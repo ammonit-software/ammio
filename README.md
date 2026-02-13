@@ -4,26 +4,22 @@ C-based interface layer for testing critical software systems. Bridges test scri
 
 ## Requirements
 
-- CMake 3.10+
-- nng library (nanomsg-next-gen)
-
-```bash
-# Install nng on Ubuntu/Debian
-sudo apt install libnng-dev
-```
+- CMake 3.13+
+- MSVC 2022 (Windows)
+- Git submodules: `git submodule update --init --recursive`
 
 ## Installation
 
 ```bash
-mkdir build && cd build
-cmake ..
-make
+# Windows
+scripts\build.bat
 ```
 
 ## Usage
 
 ```bash
-./build/ammio --config /path/to/config.json
+# Windows
+build\Debug\ammio.exe config\config.json
 ```
 
 ## License
