@@ -1,0 +1,12 @@
+[submodule "external/cJSON"]
+	path = external/cJSON
+	url = https://github.com/DaveGamble/cJSON.git
+[submodule "external/uthash"]
+	path = external/uthash
+	url = https://github.com/troydhanson/uthash.git
+[submodule "external/nng"]
+	path = external/nng
+	url = https://github.com/nanomsg/nng.git
+[submodule "external/TCNopen"]
+	path = external/TCNopen
+	url = https://github.com/T12z/TCNopen.git
