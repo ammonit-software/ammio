@@ -10,6 +10,7 @@
 
 #include "trdp_if_light.h"
 #include "vos_thread.h"
+#include "vos_sock.h"
 
 #define MAX_CONTAINERS 64
 
@@ -24,8 +25,7 @@ static size_t input_count = 0;
 static trdp_container_t output_containers[MAX_CONTAINERS];
 static size_t output_count = 0;
 
-static thrd_t thread_get_var_table;
-static thrd_t thread_set_var_table;
+static thrd_t thread_process;
 static atomic_bool running = false;
 
 // Get byte size for a type
@@ -219,7 +219,7 @@ static int parse_container(cJSON *json, trdp_container_t *container)
 
     if (!name || !cJSON_IsString(name))
     {
-        log_info("trdp: container missing name");
+        log_debug("trdp: container missing name");
         return -1;
     }
 
@@ -239,20 +239,30 @@ static int parse_container(cJSON *json, trdp_container_t *container)
     container->buffer = calloc(1, container->size_bytes);
     if (!container->buffer)
     {
-        log_info("trdp: failed to allocate buffer for container %s", container->name);
+        log_debug("trdp: failed to allocate buffer for container %s", container->name);
         return -1;
     }
 
     // Parse variables
     container->var_count = 0;
+    container->variables = NULL;
     if (variables && cJSON_IsArray(variables))
     {
+        int num_vars = cJSON_GetArraySize(variables);
+        if (num_vars > 0)
+        {
+            container->variables = calloc((size_t)num_vars, sizeof(trdp_var_mapping_t));
+            if (!container->variables)
+            {
+                log_debug("trdp: failed to allocate variables for container %s", container->name);
+                free(container->buffer);
+                return -1;
+            }
+        }
+
         cJSON *var;
         cJSON_ArrayForEach(var, variables)
         {
-            if (container->var_count >= TRDP_MAX_VARS_PER_CONTAINER)
-                break;
-
             cJSON *var_name = cJSON_GetObjectItem(var, "name");
             cJSON *var_offset = cJSON_GetObjectItem(var, "offset");
             cJSON *var_type = cJSON_GetObjectItem(var, "type");
@@ -300,14 +310,18 @@ static int parse_containers(cJSON *json_array, trdp_container_t *containers, siz
     return 0;
 }
 
-// Thread: get values from var_table and publish to protocol bus
-static int thread_get_var_table_func(void *arg)
+// Main protocol loop
+static int thread_process_func(void *arg)
 {
     (void)arg;
     TRDP_ERR_T err;
+    TRDP_FDS_T rfds;
+    TRDP_TIME_T tv;
+    INT32 noOfDesc;
 
     while (running)
     {
+        // Send: get values from var_table and publish to protocol bus
         for (size_t i = 0; i < input_count; i++)
         {
             trdp_container_t *container = &input_containers[i];
@@ -323,27 +337,11 @@ static int thread_get_var_table_func(void *arg)
             }
         }
 
-        struct timespec ts = {0, 1000000};  // 1ms
-        thrd_sleep(&ts, NULL);
-    }
-
-    return 0;
-}
-
-// Thread: receive from protocol bus and set values into var_table
-static int thread_set_var_table_func(void *arg)
-{
-    (void)arg;
-    TRDP_ERR_T err;
-    TRDP_FDS_T rfds;
-    TRDP_TIME_T tv;
-    INT32 noOfDesc;
-
-    while (running)
-    {
+        // TRDP housekeeping
         FD_ZERO(&rfds);
         tv.tv_sec = 0;
         tv.tv_usec = 10000;  // 10ms
+        noOfDesc = 0;
 
         err = tlc_getInterval(app_handle, &tv, &rfds, &noOfDesc);
         if (err != TRDP_NO_ERR)
@@ -351,12 +349,16 @@ static int thread_set_var_table_func(void *arg)
             log_debug("trdp: tlc_getInterval failed: %d", err);
         }
 
+        // Wait for network data or timeout
+        (void)vos_select((VOS_SOCK_T)noOfDesc, &rfds, NULL, NULL, &tv);
+
         err = tlc_process(app_handle, &rfds, &noOfDesc);
         if (err != TRDP_NO_ERR && err != TRDP_NODATA_ERR)
         {
             log_debug("trdp: tlc_process failed: %d", err);
         }
 
+        // Receive: get values from protocol bus and set into var_table
         for (size_t i = 0; i < output_count; i++)
         {
             trdp_container_t *container = &output_containers[i];
@@ -378,8 +380,6 @@ static int thread_set_var_table_func(void *arg)
             }
         }
 
-        struct timespec ts = {0, 1000000};  // 1ms
-        thrd_sleep(&ts, NULL);
     }
 
     return 0;
@@ -395,13 +395,13 @@ static int trdp_init(cJSON *config)
     {
         strncpy(local_ip, local_ip_json->valuestring, 15);
     }
-    log_info("trdp: local_ip = %s", local_ip);
+    log_debug("trdp: local_ip = %s", local_ip);
 
     // Parse containers
     cJSON *containers = cJSON_GetObjectItem(config, "containers");
     if (!containers)
     {
-        log_info("trdp: no containers defined");
+        log_debug("trdp: no containers defined");
         return 0;
     }
 
@@ -410,7 +410,7 @@ static int trdp_init(cJSON *config)
     if (inputs)
     {
         parse_containers(inputs, input_containers, &input_count, MAX_CONTAINERS);
-        log_info("trdp: parsed %zu input containers", input_count);
+        log_debug("trdp: parsed %zu input containers", input_count);
     }
 
     // Parse outputs (ammio subscribes from SUT)
@@ -418,7 +418,7 @@ static int trdp_init(cJSON *config)
     if (outputs)
     {
         parse_containers(outputs, output_containers, &output_count, MAX_CONTAINERS);
-        log_info("trdp: parsed %zu output containers", output_count);
+        log_debug("trdp: parsed %zu output containers", output_count);
     }
 
     return 0;
@@ -432,7 +432,7 @@ static int trdp_start(void)
     err = tlc_init(NULL, NULL, NULL);
     if (err != TRDP_NO_ERR)
     {
-        log_info("trdp: tlc_init failed: %d", err);
+        log_debug("trdp: tlc_init failed: %d", err);
         return -1;
     }
 
@@ -441,11 +441,11 @@ static int trdp_start(void)
     err = tlc_openSession(&app_handle, own_ip, 0, NULL, NULL, NULL, NULL);
     if (err != TRDP_NO_ERR)
     {
-        log_info("trdp: tlc_openSession failed: %d", err);
+        log_debug("trdp: tlc_openSession failed: %d", err);
         tlc_terminate();
         return -1;
     }
-    log_info("trdp: session opened");
+    log_debug("trdp: session opened");
 
     // Create publishers for input containers
     for (size_t i = 0; i < input_count; i++)
@@ -462,13 +462,13 @@ static int trdp_start(void)
 
         if (err != TRDP_NO_ERR)
         {
-            log_info("trdp: tlp_publish failed for %s (comid=%u): %d",
+            log_debug("trdp: tlp_publish failed for %s (comid=%u): %d",
                     container->name, container->comid, err);
         }
         else
         {
             container->handle = pub_handle;
-            log_info("trdp: publishing %s (comid=%u, dest=%s, period=%ums)",
+            log_debug("trdp: publishing %s (comid=%u, dest=%s, period=%ums)",
                     container->name, container->comid, container->multicast_ip, container->period_ms);
         }
     }
@@ -488,40 +488,29 @@ static int trdp_start(void)
 
         if (err != TRDP_NO_ERR)
         {
-            log_info("trdp: tlp_subscribe failed for %s (comid=%u): %d",
+            log_debug("trdp: tlp_subscribe failed for %s (comid=%u): %d",
                     container->name, container->comid, err);
         }
         else
         {
             container->handle = sub_handle;
-            log_info("trdp: subscribed to %s (comid=%u, src=%s)",
+            log_debug("trdp: subscribed to %s (comid=%u, src=%s)",
                     container->name, container->comid, container->multicast_ip);
         }
     }
 
-    // Start threads
+    // Start process thread
     running = true;
 
-    if (thrd_create(&thread_get_var_table, thread_get_var_table_func, NULL) != thrd_success)
+    if (thrd_create(&thread_process, thread_process_func, NULL) != thrd_success)
     {
-        log_info("trdp: failed to create get_var_table thread");
+        log_info("trdp: failed to create process thread");
         running = false;
         tlc_closeSession(app_handle);
         tlc_terminate();
         return -1;
     }
-    log_info("trdp: get_var_table thread started");
-
-    if (thrd_create(&thread_set_var_table, thread_set_var_table_func, NULL) != thrd_success)
-    {
-        log_info("trdp: failed to create set_var_table thread");
-        running = false;
-        thrd_join(thread_get_var_table, NULL);
-        tlc_closeSession(app_handle);
-        tlc_terminate();
-        return -1;
-    }
-    log_info("trdp: set_var_table thread started");
+    log_info("trdp: process thread started");
 
     return 0;
 }
@@ -534,10 +523,9 @@ static void trdp_stop(void)
     // Signal threads to stop
     running = false;
 
-    // Wait for threads
-    thrd_join(thread_get_var_table, NULL);
-    thrd_join(thread_set_var_table, NULL);
-    log_info("trdp: threads stopped");
+    // Wait for thread
+    thrd_join(thread_process, NULL);
+    log_debug("trdp: process thread stopped");
 
     // Unpublish all input containers
     for (size_t i = 0; i < input_count; i++)
@@ -549,6 +537,8 @@ static void trdp_stop(void)
         }
         free(input_containers[i].buffer);
         input_containers[i].buffer = NULL;
+        free(input_containers[i].variables);
+        input_containers[i].variables = NULL;
     }
 
     // Unsubscribe all output containers
@@ -561,6 +551,8 @@ static void trdp_stop(void)
         }
         free(output_containers[i].buffer);
         output_containers[i].buffer = NULL;
+        free(output_containers[i].variables);
+        output_containers[i].variables = NULL;
     }
 
     // Close session and terminate
@@ -570,7 +562,7 @@ static void trdp_stop(void)
         app_handle = NULL;
     }
     tlc_terminate();
-    log_info("trdp: terminated");
+    log_debug("trdp: terminated");
 }
 
 static protocol_t trdp_protocol = {

@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define TRDP_MAX_VARS_PER_CONTAINER 256
 #define TRDP_MAX_NAME_LEN 256
 
 typedef struct
@@ -25,7 +24,7 @@ typedef struct
     uint32_t size_bits;
     uint32_t size_bytes;
     uint8_t *buffer;
-    trdp_var_mapping_t variables[TRDP_MAX_VARS_PER_CONTAINER];
+    trdp_var_mapping_t *variables;
     size_t var_count;
     void *handle;  // TRDP_PUB_T or TRDP_SUB_T
 } trdp_container_t;

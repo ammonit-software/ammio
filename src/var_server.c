@@ -17,7 +17,11 @@ static char *handle_read(const char *name)
     var_t var;
     if (var_table_get(name, &var) != 0) {
         log_debug("read: %s (not found)", name);
-        return cJSON_PrintUnformatted(cJSON_CreateObject());
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "error", "variable not found");
+        char *str = cJSON_PrintUnformatted(resp);
+        cJSON_Delete(resp);
+        return str;
     }
 
     cJSON *resp = cJSON_CreateObject();
@@ -67,32 +71,56 @@ static char *handle_read(const char *name)
 
 static char *handle_write(const char *name, double value)
 {
-    log_debug("write: %s = %f", name, value);
-
     var_t var;
     if (var_table_get(name, &var) != 0) {
+        log_debug("write: %s (not found)", name);
         cJSON *resp = cJSON_CreateObject();
         cJSON_AddStringToObject(resp, "error", "variable not found");
         char *str = cJSON_PrintUnformatted(resp);
         cJSON_Delete(resp);
         return str;
     }
-
-    switch (var.type) {
-        case TYPE_UINT8:   var.value.u8  = (uint8_t)value;  break;
-        case TYPE_INT8:    var.value.i8  = (int8_t)value;   break;
-        case TYPE_UINT16:  var.value.u16 = (uint16_t)value; break;
-        case TYPE_INT16:   var.value.i16 = (int16_t)value;  break;
-        case TYPE_UINT32:  var.value.u32 = (uint32_t)value; break;
-        case TYPE_INT32:   var.value.i32 = (int32_t)value;  break;
-        case TYPE_FLOAT32: var.value.f32 = (float)value;    break;
-        case TYPE_FLOAT64: var.value.f64 = value;           break;
+    
+    switch (var.type)
+    {
+    case TYPE_UINT8:
+        var.value.u8 = (uint8_t)value;
+        log_debug("write: %s = %u", name, var.value.u8);
+        break;
+    case TYPE_INT8:
+        var.value.i8 = (int8_t)value;
+        log_debug("write: %s = %d", name, var.value.i8);
+        break;
+    case TYPE_UINT16:
+        var.value.u16 = (uint16_t)value;
+        log_debug("write: %s = %u", name, var.value.u16);
+        break;
+    case TYPE_INT16:
+        var.value.i16 = (int16_t)value;
+        log_debug("write: %s = %d", name, var.value.i16);
+        break;
+    case TYPE_UINT32:
+        var.value.u32 = (uint32_t)value;
+        log_debug("write: %s = %u", name, var.value.u32);
+        break;
+    case TYPE_INT32:
+        var.value.i32 = (int32_t)value;
+        log_debug("write: %s = %d", name, var.value.i32);
+        break;
+    case TYPE_FLOAT32:
+        var.value.f32 = (float)value;
+        log_debug("write: %s = %f", name, var.value.f32);
+        break;
+    case TYPE_FLOAT64:
+        var.value.f64 = value;
+        log_debug("write: %s = %f", name, var.value.f64);
+        break;
     }
 
-    int rc = var_table_set(name, &var);
+    var_table_set(name, &var);
 
     cJSON *resp = cJSON_CreateObject();
-    cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
+    cJSON_AddStringToObject(resp, "status", "ok");
     char *str = cJSON_PrintUnformatted(resp);
     cJSON_Delete(resp);
     return str;
