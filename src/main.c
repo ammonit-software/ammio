@@ -1,4 +1,5 @@
 #include <signal.h>
+#include <stdio.h>
 #include "config.h"
 #include "log.h"
 #include "var_table.h"
@@ -16,22 +17,21 @@ static void signal_handler(int sig)
 
 int main(int argc, char *argv[])
 {
-    const char *config_path;
-    cJSON *log_level;
-    cJSON *endpoint;
-
-    if (argc < 2)
+    if (argc < 3)
     {
+        fprintf(stderr, "Usage: ammio <config.json> <interface.json>\n");
         return 1;
     }
-    config_path = argv[1];
+
+    const char *config_path = argv[1];
+    const char *interface_path = argv[2];
 
     if (config_load(config_path) != 0)
     {
         return 1;
     }
 
-    log_level = config_get("traces.log_level");
+    cJSON *log_level = config_get("log_level");
     if (log_level && cJSON_IsNumber(log_level))
     {
         log_set_level(log_level->valueint);
@@ -47,23 +47,33 @@ int main(int argc, char *argv[])
 
     var_table_init();
 
-    // Initialize configured protocols (populates var_table)
-    if (protocols_init() != 0)
+    // Load interface config and initialize protocols
+    cJSON *interface_config = config_load_json(interface_path);
+    if (!interface_config)
     {
+        return 1;
+    }
+    log_info("Interface loaded: %s", interface_path);
+
+    if (protocols_init_with(interface_config) != 0)
+    {
+        cJSON_Delete(interface_config);
         return 1;
     }
 
     log_info("Variable table initialized");
 
-    endpoint = config_get("connection.endpoint");
+    cJSON *endpoint = config_get("ammio_endpoint");
     if (!endpoint || !cJSON_IsString(endpoint))
     {
-        log_info("Missing connection.endpoint in config");
+        log_info("Missing ammio_endpoint in config");
+        cJSON_Delete(interface_config);
         return 1;
     }
 
     if (var_server_init(endpoint->valuestring) != 0)
     {
+        cJSON_Delete(interface_config);
         return 1;
     }
 
@@ -72,10 +82,12 @@ int main(int argc, char *argv[])
     // Start protocol communication threads
     if (protocols_start() != 0)
     {
+        cJSON_Delete(interface_config);
         return 1;
     }
 
     var_server_run();
 
+    cJSON_Delete(interface_config);
     return 0;
 }

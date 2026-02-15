@@ -5,12 +5,13 @@
 
 static cJSON *config = NULL;
 
-int config_load(const char *path)
+// Read and parse a JSON file, caller owns the returned cJSON
+cJSON *config_load_json(const char *path)
 {
     FILE *f = fopen(path, "r");
     if (!f) {
-        fprintf(stderr, "Failed to open config file: %s\n", path);
-        return -1;
+        fprintf(stderr, "Failed to open file: %s\n", path);
+        return NULL;
     }
 
     fseek(f, 0, SEEK_END);
@@ -20,22 +21,28 @@ int config_load(const char *path)
     char *data = malloc(len + 1);
     if (!data) {
         fclose(f);
-        return -1;
+        return NULL;
     }
 
     fread(data, 1, len, f);
     data[len] = '\0';
     fclose(f);
 
-    config = cJSON_Parse(data);
+    cJSON *json = cJSON_Parse(data);
     free(data);
 
-    if (!config) {
-        fprintf(stderr, "Failed to parse config JSON\n");
-        return -1;
+    if (!json) {
+        fprintf(stderr, "Failed to parse JSON: %s\n", path);
+        return NULL;
     }
 
-    return 0;
+    return json;
+}
+
+int config_load(const char *path)
+{
+    config = config_load_json(path);
+    return config ? 0 : -1;
 }
 
 cJSON *config_get(const char *path)

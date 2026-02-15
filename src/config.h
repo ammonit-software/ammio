@@ -5,5 +5,6 @@
 
 int config_load(const char *path);
 cJSON *config_get(const char *path);
+cJSON *config_load_json(const char *path);
 
 #endif

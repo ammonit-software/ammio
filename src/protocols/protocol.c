@@ -15,9 +15,8 @@ void protocol_register(protocol_t *proto)
     }
 }
 
-int protocols_init(void)
+int protocols_init_with(cJSON *interface_config)
 {
-    cJSON *interface_config = config_get("interface");
     if (!interface_config)
     {
         log_info("No interface configured");

@@ -11,7 +11,7 @@ typedef struct {
 } protocol_t;
 
 void protocol_register(protocol_t *proto);
-int protocols_init(void);
+int protocols_init_with(cJSON *interface_config);
 int protocols_start(void);
 void protocols_stop(void);
 
