@@ -8,7 +8,7 @@
 
 # ammio
 
-**ammio** is a C-based interface layer for testing critical software systems. It acts as a bridge between test scripts and the System Under Test (SUT), handling protocol communication and signal management.
+**ammio** is a C-based interface layer for testing critical software systems. It acts as a bridge between test scripts and the System Under Test (SUT), handling protocol communication and variable management.
 
 For the SUT, ammio simulates the outside world. For the tester, ammio provides an interface to write inputs and read outputs.
 
@@ -65,14 +65,14 @@ This is powerfull for bringing the SUT to desired states.
 - the system under test will write a certain variable with a certain value
 - ammio will read from the communication bus that variable with that value
 
+This is powerfull for checking the behaviour of the SUT.
+
 ```json
 {"cmd": "read", "name": "SYSTEM_STATUS"}
 ```
 ```json
 {"name": "SYSTEM_STATUS", "type": "uint8", "dir": "output", "value": 3, "timestamp": 1740000000000}
 ```
-
-This is powerfull for checking the behaviour of the SUT.
 
 ## Architecture
 
@@ -99,7 +99,7 @@ This is powerfull for checking the behaviour of the SUT.
 
 **var_server**: Handles client communication. Parses JSON requests, enforces direction constraints, and returns numeric error codes.
 
-**var_table**: Thread-safe hash map storing all signals with their type, direction (`input`/`output`), value, and timestamp. Inputs can be written and read by the client. Outputs are read-only — only the protocol layer can update them.
+**var_table**: Thread-safe hash map storing all variables with their type, direction (`input`/`output`), value, and timestamp. Inputs can be written and read by the client. Outputs are read-only — only the protocol layer can update them.
 
 **Protocol plugins**: Each plugin implements `init / start / stop`. Internally runs a single `thread_process` loop: publish inputs to the protocol bus, run protocol housekeeping (`select` + `process`), receive outputs from the protocol bus. All protocol operations run in one thread — protocol libraries are not thread-safe per session.
 
@@ -128,8 +128,8 @@ This is powerfull for checking the behaviour of the SUT.
 }
 ```
 
-Inputs = signals ammio sends to the SUT (test client can write).
-Outputs = signals ammio receives from the SUT (test client can only read).
+Inputs = variables ammio sends to the SUT (test client can write).
+Outputs = variables ammio receives from the SUT (test client can only read).
 
 ## Related Projects
 
