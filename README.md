@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/ammio.png" alt="ammio" width="120"/>
+  <img src="assets/ammio.png" alt="ammio" width="350"/>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 
 **ammio** is a C-based interface layer for testing critical software systems. It acts as a bridge between test scripts and the System Under Test (SUT), handling protocol communication and signal management.
 
-For the SUT, ammio simulates the outside world. For the tester, ammio provides an interface to force inputs and observe outputs.
+For the SUT, ammio simulates the outside world. For the tester, ammio provides an interface to write inputs and read outputs.
 
 ## Quickstart
 
@@ -44,14 +44,35 @@ build\Debug\ammio.exe config\config.json config\interface.json
 
 ### Test interface
 
-ammio exposes a REQ/REP socket on a given endpoint. Send JSON requests:
+Once ammio is running, interact with it by sending JSON requests over the configured endpoint.
+
+**Write an input to the SUT**
+
+- ammio will write to the communication bus a certain variable with a certain value
+- the system under test will read that variable with that value
+
+This is powerfull for bringing the SUT to desired states.
 
 ```json
 {"cmd": "write", "name": "IO_BRAKE_ENABLE", "value": 1}
-{"cmd": "read",  "name": "SYSTEM_STATUS"}
-{"cmd": "list_vars"}
-{"cmd": "list_errors"}
 ```
+```json
+{"status": "ok"}
+```
+
+**Read an output from the SUT**
+
+- the system under test will write a certain variable with a certain value
+- ammio will read from the communication bus that variable with that value
+
+```json
+{"cmd": "read", "name": "SYSTEM_STATUS"}
+```
+```json
+{"name": "SYSTEM_STATUS", "type": "uint8", "dir": "output", "value": 3, "timestamp": 1740000000000}
+```
+
+This is powerfull for checking the behaviour of the SUT.
 
 ## Architecture
 
