@@ -208,7 +208,7 @@ static void set_to_var_table(trdp_container_t *container)
 }
 
 // Parse container from JSON and populate structure
-static int parse_container(cJSON *json, trdp_container_t *container)
+static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
 {
     cJSON *name = cJSON_GetObjectItem(json, "name");
     cJSON *comid = cJSON_GetObjectItem(json, "comid");
@@ -277,7 +277,7 @@ static int parse_container(cJSON *json, trdp_container_t *container)
                 var_table_type_from_string(var_type->valuestring) : TYPE_UINT8;
 
             // Add to var_table
-            var_table_add(mapping->name, mapping->type);
+            var_table_add(mapping->name, mapping->type, dir);
             log_debug("trdp: added variable %s (offset=%u, type=%s)",
                      mapping->name, mapping->offset_bits, var_type ? var_type->valuestring : "uint8");
 
@@ -290,7 +290,7 @@ static int parse_container(cJSON *json, trdp_container_t *container)
 }
 
 // Parse containers from JSON array
-static int parse_containers(cJSON *json_array, trdp_container_t *containers, size_t *count, size_t max)
+static int parse_containers(cJSON *json_array, trdp_container_t *containers, size_t *count, size_t max, dir_t dir)
 {
     *count = 0;
     if (!json_array || !cJSON_IsArray(json_array))
@@ -302,7 +302,7 @@ static int parse_containers(cJSON *json_array, trdp_container_t *containers, siz
         if (*count >= max)
             break;
 
-        if (parse_container(item, &containers[*count]) == 0)
+        if (parse_container(item, &containers[*count], dir) == 0)
         {
             (*count)++;
         }
@@ -409,7 +409,7 @@ static int trdp_init(cJSON *config)
     cJSON *inputs = cJSON_GetObjectItem(containers, "inputs");
     if (inputs)
     {
-        parse_containers(inputs, input_containers, &input_count, MAX_CONTAINERS);
+        parse_containers(inputs, input_containers, &input_count, MAX_CONTAINERS, DIR_INPUT);
         log_debug("trdp: parsed %zu input containers", input_count);
     }
 
@@ -417,7 +417,7 @@ static int trdp_init(cJSON *config)
     cJSON *outputs = cJSON_GetObjectItem(containers, "outputs");
     if (outputs)
     {
-        parse_containers(outputs, output_containers, &output_count, MAX_CONTAINERS);
+        parse_containers(outputs, output_containers, &output_count, MAX_CONTAINERS, DIR_OUTPUT);
         log_debug("trdp: parsed %zu output containers", output_count);
     }
 

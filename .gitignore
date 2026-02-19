@@ -28,6 +28,7 @@ Makefile
 
 # Configurations
 config.json
+interface.json
 
 # Claude
 CLAUDE.md

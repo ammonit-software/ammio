@@ -1,5 +1,6 @@
 #include "var_table.h"
 #include "uthash.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -35,7 +36,7 @@ type_t var_table_type_from_string(const char *type_str)
     return TYPE_UINT8;
 }
 
-int var_table_add(const char *name, type_t type)
+int var_table_add(const char *name, type_t type, dir_t dir)
 {
     var_entry_t *entry = calloc(1, sizeof(var_entry_t));
     if (!entry)
@@ -44,6 +45,7 @@ int var_table_add(const char *name, type_t type)
     strncpy(entry->name, name, 255);
     strncpy(entry->var.name, name, 255);
     entry->var.type = type;
+    entry->var.dir = dir;
 
     mtx_lock(&var_table_mutex);
     HASH_ADD_STR(var_table, name, entry);
@@ -104,4 +106,65 @@ int var_table_set(const char *name, const var_t *in)
     entry->var.timestamp = get_timestamp_ns();
     mtx_unlock(&var_table_mutex);
     return 0;
+}
+
+int var_table_get_all(var_t **out, size_t *count)
+{
+    if (!out || !count)
+        return -1;
+
+    mtx_lock(&var_table_mutex);
+    size_t n = HASH_COUNT(var_table);
+    if (n == 0)
+    {
+        mtx_unlock(&var_table_mutex);
+        *out = NULL;
+        *count = 0;
+        return 0;
+    }
+
+    var_t *arr = calloc(n, sizeof(var_t));
+    if (!arr)
+    {
+        mtx_unlock(&var_table_mutex);
+        return -1;
+    }
+
+    size_t i = 0;
+    var_entry_t *entry, *tmp;
+    HASH_ITER(hh, var_table, entry, tmp)
+    {
+        arr[i++] = entry->var;
+    }
+    mtx_unlock(&var_table_mutex);
+
+    *out = arr;
+    *count = n;
+    return 0;
+}
+
+const char *var_table_type_to_string(type_t type)
+{
+    switch (type)
+    {
+        case TYPE_UINT8:   return "uint8";
+        case TYPE_INT8:    return "int8";
+        case TYPE_UINT16:  return "uint16";
+        case TYPE_INT16:   return "int16";
+        case TYPE_UINT32:  return "uint32";
+        case TYPE_INT32:   return "int32";
+        case TYPE_FLOAT32: return "float32";
+        case TYPE_FLOAT64: return "float64";
+        default:           return "unknown";
+    }
+}
+
+const char *var_table_dir_to_string(dir_t dir)
+{
+    switch (dir)
+    {
+        case DIR_INPUT:  return "input";
+        case DIR_OUTPUT: return "output";
+        default:         return "unknown";
+    }
 }

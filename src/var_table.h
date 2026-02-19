@@ -16,10 +16,17 @@ typedef enum
     TYPE_FLOAT64
 } type_t;
 
+typedef enum
+{
+    DIR_INPUT,
+    DIR_OUTPUT
+} dir_t;
+
 typedef struct
 {
     char name[256];
     type_t type;
+    dir_t dir;
     union
     {
         uint8_t u8;
@@ -36,10 +43,14 @@ typedef struct
 
 int var_table_init(void);
 void var_table_cleanup(void);
-int var_table_add(const char *name, type_t type);
+int var_table_add(const char *name, type_t type, dir_t dir);
 type_t var_table_type_from_string(const char *type_str);
 
 int var_table_get(const char *name, var_t *out);
 int var_table_set(const char *name, const var_t *in);
+int var_table_get_all(var_t **out, size_t *count);
+
+const char *var_table_type_to_string(type_t type);
+const char *var_table_dir_to_string(dir_t dir);
 
 #endif

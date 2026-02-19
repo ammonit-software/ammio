@@ -9,6 +9,37 @@
 #include <string.h>
 #include <stdbool.h>
 
+typedef enum {
+    ERR_OK = 0,
+    ERR_NOT_FOUND = 1,
+    ERR_READ_ONLY = 2,
+    ERR_INVALID_JSON = 3,
+    ERR_INVALID_CMD = 4,
+    ERR_MISSING_VALUE = 5
+} var_error_t;
+
+static const char *var_error_str(var_error_t code)
+{
+    switch (code) {
+        case ERR_OK:            return "ok";
+        case ERR_NOT_FOUND:     return "variable not found";
+        case ERR_READ_ONLY:     return "read-only variable";
+        case ERR_INVALID_JSON:  return "invalid json";
+        case ERR_INVALID_CMD:   return "invalid command";
+        case ERR_MISSING_VALUE: return "missing value";
+        default:                return "unknown error";
+    }
+}
+
+static char *make_error(var_error_t code)
+{
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddNumberToObject(resp, "error", code);
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    return str;
+}
+
 static nng_socket sock;
 static bool running = false;
 
@@ -17,11 +48,7 @@ static char *handle_read(const char *name)
     var_t var;
     if (var_table_get(name, &var) != 0) {
         log_debug("read: %s (not found)", name);
-        cJSON *resp = cJSON_CreateObject();
-        cJSON_AddStringToObject(resp, "error", "variable not found");
-        char *str = cJSON_PrintUnformatted(resp);
-        cJSON_Delete(resp);
-        return str;
+        return make_error(ERR_NOT_FOUND);
     }
 
     cJSON *resp = cJSON_CreateObject();
@@ -74,13 +101,14 @@ static char *handle_write(const char *name, double value)
     var_t var;
     if (var_table_get(name, &var) != 0) {
         log_debug("write: %s (not found)", name);
-        cJSON *resp = cJSON_CreateObject();
-        cJSON_AddStringToObject(resp, "error", "variable not found");
-        char *str = cJSON_PrintUnformatted(resp);
-        cJSON_Delete(resp);
-        return str;
+        return make_error(ERR_NOT_FOUND);
     }
-    
+
+    if (var.dir == DIR_OUTPUT) {
+        log_debug("write: %s (read-only)", name);
+        return make_error(ERR_READ_ONLY);
+    }
+
     switch (var.type)
     {
     case TYPE_UINT8:
@@ -126,17 +154,74 @@ static char *handle_write(const char *name, double value)
     return str;
 }
 
+static char *handle_list_vars(void)
+{
+    var_t *vars = NULL;
+    size_t count = 0;
+
+    if (var_table_get_all(&vars, &count) != 0) {
+        return make_error(ERR_INVALID_CMD);
+    }
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+
+    for (size_t i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "name", vars[i].name);
+        cJSON_AddStringToObject(item, "type", var_table_type_to_string(vars[i].type));
+        cJSON_AddStringToObject(item, "dir", var_table_dir_to_string(vars[i].dir));
+        cJSON_AddItemToArray(arr, item);
+    }
+
+    free(vars);
+    cJSON_AddItemToObject(resp, "vars", arr);
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    return str;
+}
+
+static char *handle_list_errors(void)
+{
+    cJSON *resp = cJSON_CreateObject();
+    cJSON *errors = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(errors, "0", var_error_str(ERR_OK));
+    cJSON_AddStringToObject(errors, "1", var_error_str(ERR_NOT_FOUND));
+    cJSON_AddStringToObject(errors, "2", var_error_str(ERR_READ_ONLY));
+    cJSON_AddStringToObject(errors, "3", var_error_str(ERR_INVALID_JSON));
+    cJSON_AddStringToObject(errors, "4", var_error_str(ERR_INVALID_CMD));
+    cJSON_AddStringToObject(errors, "5", var_error_str(ERR_MISSING_VALUE));
+
+    cJSON_AddItemToObject(resp, "errors", errors);
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    return str;
+}
+
 static char *process_request(const char *msg)
 {
     cJSON *req = cJSON_Parse(msg);
     if (!req) {
-        return strdup("{\"error\":\"invalid json\"}");
+        return make_error(ERR_INVALID_JSON);
     }
 
     cJSON *cmd = cJSON_GetObjectItem(req, "cmd");
-    cJSON *name = cJSON_GetObjectItem(req, "name");
-
     char *response = NULL;
+
+    if (cmd && cJSON_IsString(cmd) && strcmp(cmd->valuestring, "list_errors") == 0) {
+        response = handle_list_errors();
+        cJSON_Delete(req);
+        return response;
+    }
+
+    if (cmd && cJSON_IsString(cmd) && strcmp(cmd->valuestring, "list_vars") == 0) {
+        response = handle_list_vars();
+        cJSON_Delete(req);
+        return response;
+    }
+
+    cJSON *name = cJSON_GetObjectItem(req, "name");
 
     if (cmd && cJSON_IsString(cmd) && name && cJSON_IsString(name)) {
         if (strcmp(cmd->valuestring, "read") == 0) {
@@ -146,13 +231,13 @@ static char *process_request(const char *msg)
             if (value && cJSON_IsNumber(value)) {
                 response = handle_write(name->valuestring, value->valuedouble);
             } else {
-                response = strdup("{\"error\":\"missing value\"}");
+                response = make_error(ERR_MISSING_VALUE);
             }
         }
     }
 
     if (!response) {
-        response = strdup("{\"error\":\"invalid command\"}");
+        response = make_error(ERR_INVALID_CMD);
     }
 
     cJSON_Delete(req);
