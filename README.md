@@ -128,8 +128,8 @@ This is powerfull for checking the behaviour of the SUT.
 }
 ```
 
-Inputs = variables ammio sends to the SUT (test client can write).
-Outputs = variables ammio receives from the SUT (test client can only read).
+- Inputs = variables ammio sends to the SUT (test client can write).
+- Outputs = variables ammio receives from the SUT (test client can only read).
 
 ## Related Projects
 
