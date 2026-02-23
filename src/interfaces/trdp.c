@@ -565,7 +565,7 @@ static void trdp_stop(void)
     log_debug("trdp: terminated");
 }
 
-static protocol_t trdp_protocol = {
+static interface_t trdp_interface = {
     .name = "trdp",
     .init = trdp_init,
     .start = trdp_start,
@@ -574,5 +574,5 @@ static protocol_t trdp_protocol = {
 
 void trdp_register(void)
 {
-    protocol_register(&trdp_protocol);
+    interface_register(&trdp_interface);
 }

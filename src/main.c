@@ -4,14 +4,14 @@
 #include "log.h"
 #include "var_table.h"
 #include "var_server.h"
-#include "protocols/protocol.h"
-#include "protocols/trdp.h"
+#include "interfaces/interface.h"
+#include "interfaces/trdp.h"
 
 static void signal_handler(int sig)
 {
     (void)sig;
     log_info("Shutting down...");
-    protocols_stop();
+    interfaces_stop();
     var_server_stop();
 }
 
@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     }
     log_info("Interface loaded: %s", interface_path);
 
-    if (protocols_init_with(interface_config) != 0)
+    if (interfaces_init_with(interface_config) != 0)
     {
         cJSON_Delete(interface_config);
         return 1;
@@ -80,7 +80,7 @@ int main(int argc, char *argv[])
     log_info("Server started on %s", endpoint->valuestring);
 
     // Start protocol communication threads
-    if (protocols_start() != 0)
+    if (interfaces_start() != 0)
     {
         cJSON_Delete(interface_config);
         return 1;

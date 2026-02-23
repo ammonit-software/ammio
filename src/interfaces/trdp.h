@@ -1,7 +1,7 @@
 #ifndef TRDP_H
 #define TRDP_H
 
-#include "protocol.h"
+#include "interface.h"
 #include "../var_table.h"
 #include <stdint.h>
 #include <stddef.h>

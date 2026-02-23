@@ -87,8 +87,8 @@ add_executable(ammio
     src/log.c
     src/var_table.c
     src/var_server.c
-    src/protocols/protocol.c
-    src/protocols/trdp.c
+    src/interfaces/interface.c
+    src/interfaces/trdp.c
 )
 
 target_link_libraries(ammio
