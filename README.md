@@ -38,30 +38,34 @@ ammio.exe --config config.json --interface interface.json
 
 ### 3. Interact
 
-Once **ammio** is running, send JSON requests over nng REQ/REP to the endpoint configured in `config.json` (default `tcp://127.0.0.1:5555`).
+#### Using ammtest (recommended)
 
-**Write an input** — inject a value onto the protocol bus. The SUT reads it as if it came from the real environment.
+**[ammtest](https://github.com/ammonit-software/ammtest)** is the recommended client — it adds test scripting, pytest integration, and result reporting on top of ammio.
 
-```json
-{"cmd": "write", "name": "door_is_open", "value": 1}
-```
-```json
-{"status": "ok"}
-```
+#### Using a plain nng client
 
-**Read an output** — observe a value the SUT is publishing onto the protocol bus.
+Any language with an nng binding works. With Python and `pynng`:
 
-```json
-{"cmd": "read", "name": "door_open_cmd"}
-```
-```json
-{"name": "door_open_cmd", "type": "uint8", "dir": "output", "value": 1, "timestamp": 1740000000000}
+```cmd
+pip install pynng
 ```
 
-**List all variables** — inspect the full variable table as loaded from `interface.json`.
+```python
+import pynng, json
 
-```json
-{"cmd": "list_vars"}
+with pynng.Req0() as sock:
+    sock.dial("tcp://127.0.0.1:5555")
+
+    sock.send(json.dumps({"cmd": "write", "name": "door_is_open", "value": 1}).encode())
+    print(json.loads(sock.recv()))
+    # {"status": "ok"}
+
+    sock.send(json.dumps({"cmd": "read", "name": "door_open_cmd"}).encode())
+    print(json.loads(sock.recv()))
+    # {"name": "door_open_cmd", "type": "uint8", "dir": "output", "value": 1, "timestamp": ...}
+
+    sock.send(json.dumps({"cmd": "list_vars"}).encode())
+    print(json.loads(sock.recv()))
 ```
 
 ## Architecture
