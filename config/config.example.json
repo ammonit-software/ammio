@@ -1,0 +1,4 @@
+{
+    "log_level": 1,
+    "ammio_endpoint": "tcp://127.0.0.1:5555"
+}
