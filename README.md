@@ -22,6 +22,8 @@ It addresses three core pain points in critical systems testing:
 
 #### Windows
 ```cmd
+mdir ammio
+cd ammio
 curl -L -o ammio.exe https://github.com/ammonit-software/ammio/releases/latest/download/ammio.exe
 curl -L -o config.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/config.json
 curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.opcua.example.json
