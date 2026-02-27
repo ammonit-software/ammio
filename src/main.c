@@ -1,11 +1,14 @@
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include "config.h"
 #include "log.h"
 #include "var_table.h"
 #include "var_server.h"
 #include "interfaces/interface.h"
-#include "interfaces/trdp.h"
+#include "interfaces/trdp_iface.h"
+#include "interfaces/modbus_iface.h"
+#include "interfaces/opcua_iface.h"
 
 static void signal_handler(int sig)
 {
@@ -17,14 +20,22 @@ static void signal_handler(int sig)
 
 int main(int argc, char *argv[])
 {
-    if (argc < 3)
+    const char *config_path = NULL;
+    const char *interface_path = NULL;
+
+    for (int i = 1; i < argc - 1; i++)
     {
-        fprintf(stderr, "Usage: ammio <config.json> <interface.json>\n");
-        return 1;
+        if (strcmp(argv[i], "--config") == 0)
+            config_path = argv[++i];
+        else if (strcmp(argv[i], "--interface") == 0)
+            interface_path = argv[++i];
     }
 
-    const char *config_path = argv[1];
-    const char *interface_path = argv[2];
+    if (!config_path || !interface_path)
+    {
+        fprintf(stderr, "Usage: ammio --config <config.json> --interface <interface.json>\n");
+        return 1;
+    }
 
     if (config_load(config_path) != 0)
     {
@@ -43,7 +54,9 @@ int main(int argc, char *argv[])
     signal(SIGTERM, signal_handler);
 
     // Register available protocols
-    trdp_register();
+    trdp_iface_register();
+    modbus_iface_register();
+    opcua_iface_register();
 
     var_table_init();
 

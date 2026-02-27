@@ -1,4 +1,4 @@
-#include "trdp.h"
+#include "trdp_iface.h"
 #include "../var_table.h"
 #include "../log.h"
 
@@ -572,7 +572,7 @@ static interface_t trdp_interface = {
     .stop = trdp_stop
 };
 
-void trdp_register(void)
+void trdp_iface_register(void)
 {
     interface_register(&trdp_interface);
 }

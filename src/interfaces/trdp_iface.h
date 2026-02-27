@@ -1,5 +1,5 @@
-#ifndef TRDP_H
-#define TRDP_H
+#ifndef TRDP_IFACE_H
+#define TRDP_IFACE_H
 
 #include "interface.h"
 #include "../var_table.h"
@@ -29,6 +29,6 @@ typedef struct
     void *handle;  // TRDP_PUB_T or TRDP_SUB_T
 } trdp_container_t;
 
-void trdp_register(void);
+void trdp_iface_register(void);
 
 #endif

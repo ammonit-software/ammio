@@ -17,4 +17,4 @@ goto parse_args
 :end_parse
 
 REM Manage run
-"%BUILD_DIR%\%CONFIG%\ammio.exe" config\config.json config\interface.json
+"%BUILD_DIR%\%CONFIG%\ammio.exe" --config config\config.json --interface config\interface.json

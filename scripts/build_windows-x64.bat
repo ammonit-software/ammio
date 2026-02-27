@@ -19,9 +19,11 @@ shift
 goto parse_args
 :end_parse
 
-REM Manage env (skip if not found, e.g. on CI where env is already set up)
+REM Manage env
 set VSDEVCMD=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat
-if exist "%VSDEVCMD%" call "%VSDEVCMD%" >nul 2>&1
+if not defined VSCMD_VER (
+    if exist "%VSDEVCMD%" call "%VSDEVCMD%" >nul 2>&1
+)
 
 REM Manage cmake and build
 cmake -S . -B %BUILD_DIR% -G "Visual Studio 17 2022" -A x64
