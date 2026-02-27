@@ -3,17 +3,18 @@
 </p>
 
 <p align="center">
-  <strong>Environment simulator for system-level testing of safety-critical software over various communication protocols.</strong>
+  <strong>Protocol-agnostic test interface for software systems. Talk to any software system in JSON, regardless of its protocol.</strong>
 </p>
 
 # ammio
 
-**ammio** is a service that bridges test clients and a System Under Test (SUT) over its native communication protocol. For the SUT, it simulates the outside world. For the tester, it exposes all SUT variables over a simple JSON API — no protocol knowledge required.
+**ammio** is a protocol-agnostic test interface for software systems. It sits between your test tooling and a System Under Test (SUT), speaking the SUT's native protocol on one side and exposing all its variables over a plain JSON API on the other. Talk to any software system in JSON, regardless of its protocol.
 
-It addresses two core pain points in critical systems testing:
+It addresses three core pain points in critical systems testing:
 
-- *The protocol barrier*: SUTs in critical systems speak industry-specific protocols — TRDP, CAN, ARINC 429, OPC-UA, etc. Without **ammio**, a tester needs deep knowledge of those protocols just to set a single variable. **ammio** abstracts the entire SUT interface and exposes it in real time over a plain JSON API.
-- *The feedback loop speed*: Setting up a hardware-in-the-loop bench for a critical system can take days. **ammio** lets you interact with the SUT programmatically without a physical bench — scripts, experiments, and automated tests can run immediately.
+- *The protocol barrier*: SUTs speak TRDP, CAN, OPC UA, Modbus — each requiring specialist knowledge just to read a variable. **ammio** abstracts all of it into a single JSON API.
+- *The feedback loop speed*: Hardware-in-the-loop benches take days to set up. **ammio** lets scripts and automated tests interact with the SUT immediately, without a physical bench.
+- *The protocol migration problem*: When a SUT changes or adds a protocol, every tool and test script that talked to it breaks. With **ammio** in the middle, the JSON API stays the same — no refactoring, no disruption.
 
 ## Quickstart
 
