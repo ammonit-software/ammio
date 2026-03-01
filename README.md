@@ -22,11 +22,13 @@ It addresses three core pain points in critical systems testing:
 
 #### Windows
 ```cmd
-mdir ammio
+mkdir ammio
 cd ammio
-curl -L -o ammio.exe https://github.com/ammonit-software/ammio/releases/latest/download/ammio.exe
-curl -L -o config.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/config.json
+curl -L -o ammio-windows-x64.zip https://github.com/ammonit-software/ammio/releases/latest/download/ammio-windows-x64.zip
+tar -xf ammio-windows-x64.zip
+curl -L -o config.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/config.example.json
 curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.opcua.example.json
+
 ```
 
 Tinker the `config.json` and `interface.json` and adapt them for tour needs. See [Configuration](#configuration) for more details.
