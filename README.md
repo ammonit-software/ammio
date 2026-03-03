@@ -27,7 +27,7 @@ cd ammio
 curl -L -o ammio-windows-x64.zip https://github.com/ammonit-software/ammio/releases/latest/download/ammio-windows-x64.zip
 tar -xf ammio-windows-x64.zip
 curl -L -o config.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/config.example.json
-curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.opcua.example.json
+curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.example.json
 
 ```
 
@@ -120,7 +120,7 @@ All variables live in an internal store (**var_table**) that is continuously syn
 
 ```jsonc
 {
-    "log_level": 1,              // 0 = debug, 1 = info
+    "log_level": 1,                           // 0 = debug, 1 = info
     "ammio_endpoint": "tcp://127.0.0.1:5555"  // nng endpoint where ammio listens for client connections
 }
 ```
@@ -136,9 +136,7 @@ Each entry is a user-defined connection name bound to a protocol and its specifi
 | `input` | ammio → SUT | Sensor readings, external device states, status feedback that the SUT consumes |
 | `output` | SUT → ammio | Commands, setpoints, enable signals that the SUT produces |
 
-> If you are testing a train door control unit: `door_open_cmd` is an **output** (the SUT decides to open the door), `door_is_open` is an **input** (ammio simulates the sensor the SUT reads).
-
-See `config/interface.modbus.example.json`, `config/interface.trdp.example.json`, and `config/interface.opcua.example.json` for ready-to-use starting points.
+See `config/interface.x.example.json` files for ready-to-use starting points depending on the protocol.
 
 #### Modbus
 
