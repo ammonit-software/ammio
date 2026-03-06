@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Protocol-agnostic test interface for critical-software systems. Talk to any software system in JSON, regardless of its protocol.</strong>
+  <strong>Protocol agnostic test interface for critical-software systems. Talk to any software system in JSON, regardless of its protocol.</strong>
 </p>
 
 # ammio
