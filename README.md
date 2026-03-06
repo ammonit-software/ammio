@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <strong>Protocol agnostic test interface for critical-software systems. Talk to any software system in JSON, regardless of its protocol.</strong>
+  <strong>Protocol agnostic test interface for critical-software systems. Talk to any System Under Test (SUT) in JSON, regardless of its protocol.</strong>
 </p>
 
 # ammio
 
-**ammio** is a protocol agnostic test interface for critical-software systems. It sits between your test tooling and a System Under Test (SUT), speaking the SUT's native protocol on one side and exposing all its variables over a plain JSON API on the other. Talk to any software system in JSON, regardless of its protocol.
+**ammio** is a protocol agnostic test interface for critical-software systems. It sits between your test tooling and your SUT, speaking the SUT's native protocol on one side and exposing all its variables over a plain JSON API on the other. Talk to any software system in JSON, regardless of its protocol.
 
 It addresses three core pain points in critical systems testing:
 
