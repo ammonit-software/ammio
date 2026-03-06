@@ -48,29 +48,7 @@ ammio.exe --config config.json --interface interface.json
 
 #### Using a plain nng client
 
-Any language with an nng binding works. With Python and `pynng`:
-
-```cmd
-pip install pynng
-```
-
-```python
-import pynng, json
-
-with pynng.Req0() as sock:
-    sock.dial("tcp://127.0.0.1:5555")
-
-    sock.send(json.dumps({"cmd": "write", "name": "door_is_open", "value": 1}).encode())
-    print(json.loads(sock.recv()))
-    # {"status": "ok"}
-
-    sock.send(json.dumps({"cmd": "read", "name": "door_open_cmd"}).encode())
-    print(json.loads(sock.recv()))
-    # {"name": "door_open_cmd", "type": "uint8", "dir": "output", "value": 1, "timestamp": ...}
-
-    sock.send(json.dumps({"cmd": "list_vars"}).encode())
-    print(json.loads(sock.recv()))
-```
+Any language with an nng binding works.
 
 ## Architecture
 
@@ -253,7 +231,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
 
 ## Related Projects
 
-- **[ammtest](https://github.com/ammonit-software/ammtest)**: Python test framework that communicates with **ammio** over the REQ/REP interface, and supports test scripts generation, automation and management.
+- **[ammtest](https://github.com/ammonit-software/ammtest)**: Python test framework for critical-software systems. Write, run, and trace system-level tests against any System Under Test (SUT).
 - **[Ammonit Software](https://github.com/ammonit-software)**: Parent organization.
 
 ## License
