@@ -58,7 +58,6 @@ if(WIN32)
     else()
         target_compile_definitions(trdp PUBLIC WIN32 L_ENDIAN MD_SUPPORT=1)
     endif()
-    # Suppress MSVC warnings that the official VS project also suppresses
     target_compile_definitions(trdp PRIVATE _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
     target_link_libraries(trdp PUBLIC ws2_32 iphlpapi)
 else()

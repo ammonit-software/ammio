@@ -13,6 +13,8 @@ typedef struct
     char name[TRDP_MAX_NAME_LEN];
     uint32_t offset_bits;
     type_t type;
+    int bit_index;    // -1 for regular vars; 0..N-1 for bitset members
+    int bitset_bytes; // 0 for regular vars; 1/2/4 for BITSET8/16/32
 } trdp_var_mapping_t;
 
 typedef struct
