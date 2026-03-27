@@ -26,18 +26,17 @@ mkdir ammio
 cd ammio
 curl -L -o ammio-windows-x64.zip https://github.com/ammonit-software/ammio/releases/latest/download/ammio-windows-x64.zip
 tar -xf ammio-windows-x64.zip
-curl -L -o config.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/config.example.json
 curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.example.json
 
 ```
 
-Tinker the `config.json` and `interface.json` and adapt them for tour needs. See [Configuration](#configuration) for more details.
+Tinker the `interface.json` and adapt it for your needs. See [Configuration](#configuration) for more details.
 
 ### 2. Run
 
 #### Windows
 ```cmd
-ammio.exe --config config.json --interface interface.json
+ammio.exe --endpoint tcp://127.0.0.1:5555 --interface interface.json
 ```
 
 ### 3. Interact
@@ -94,16 +93,15 @@ All variables live in an internal store (**var_table**) that is continuously syn
 
 ## Configuration
 
-### `config/config.json`
+### Command-line arguments
 
-```jsonc
-{
-    "log_level": 1,                           // 0 = debug, 1 = info
-    "ammio_endpoint": "tcp://127.0.0.1:5555"  // nng endpoint where ammio listens for client connections
-}
-```
+| Argument | Required | Description |
+|---|---|---|
+| `--endpoint <url>` | yes | nng endpoint where ammio listens for client connections (e.g. `tcp://127.0.0.1:5555`) |
+| `--interface <path>` | yes | path to the interface JSON file |
+| `--log-level <N>` | no | log verbosity: `0` = debug, `1` = info (default: info) |
 
-### `config/interface.json`
+### `interface.json`
 
 Each entry is a user-defined connection name bound to a protocol and its specification. Multiple connections of different types can coexist in the same file.
 
@@ -131,14 +129,14 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
             "registers": {
                 "inputs": [                         // holding registers ammio writes (SUT inputs)
                     {
-                        "name": "motor_speed_actual",   // variable name in var_table and JSON API
+                        "var_id": "motor_speed_actual",   // variable identifier in var_table and JSON API
                         "address": 0,               // 0-based register address on the slave
                         "type": "uint16"            // uint8 int8 uint16 int16 uint32 int32 float32 float64
                     }
                 ],
                 "outputs": [                        // holding registers ammio reads (SUT outputs)
                     {
-                        "name": "motor_speed_setpoint",
+                        "var_id": "motor_speed_setpoint",
                         "address": 10,
                         "type": "uint16"
                     }
@@ -169,7 +167,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                         "size_bits": 32,            // total payload size in bits, must match SUT dataset
                         "variables": [              // variable mappings packed inside this container
                             {
-                                "name": "door_is_open", // variable name in var_table and JSON API
+                                "var_id": "door_is_open", // variable identifier in var_table and JSON API
                                 "offset": 0,        // bit offset within the container payload
                                 "type": "uint8"     // uint8 int8 uint16 int16 uint32 int32 float32 float64
                             }
@@ -184,7 +182,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                         "period_ms": 100,
                         "size_bits": 32,
                         "variables": [
-                            { "name": "door_open_cmd", "offset": 0, "type": "uint8" }
+                            { "var_id": "door_open_cmd", "offset": 0, "type": "uint8" }
                         ]
                     }
                 ]
@@ -208,7 +206,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
             "nodes": {
                 "inputs": [                         // nodes ammio writes to (SUT inputs)
                     {
-                        "name": "motor_speed_actual",   // variable name in var_table and JSON API
+                        "var_id": "motor_speed_actual",   // variable identifier in var_table and JSON API
                         "node_id": "ns=1;s=Motor.SpeedActual", // OPC UA node identifier
                                                     // ns=<namespace>;s=<string name>
                                                     // ns=<namespace>;i=<numeric id>
@@ -218,7 +216,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                 ],
                 "outputs": [                        // nodes ammio reads from (SUT outputs)
                     {
-                        "name": "motor_speed_setpoint",
+                        "var_id": "motor_speed_setpoint",
                         "node_id": "ns=1;s=Motor.SpeedSetpoint",
                         "type": "float32"
                     }

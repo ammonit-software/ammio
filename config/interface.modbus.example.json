@@ -9,14 +9,14 @@
             "period_ms": 100,
             "registers": {
                 "inputs": [
-                    { "name": "motor_speed_actual",   "address": 0,  "type": "uint16"  },
-                    { "name": "motor_current",        "address": 2,  "type": "float32" },
-                    { "name": "fault_code",           "address": 4,  "type": "uint16"  }
+                    { "var_id": "motor_speed_actual",   "address": 0,  "type": "uint16"  },
+                    { "var_id": "motor_current",        "address": 2,  "type": "float32" },
+                    { "var_id": "fault_code",           "address": 4,  "type": "uint16"  }
                 ],
                 "outputs": [
-                    { "name": "motor_speed_setpoint", "address": 10, "type": "uint16"  },
-                    { "name": "target_temperature",   "address": 12, "type": "float32" },
-                    { "name": "motor_enable",         "address": 14, "type": "uint8"   }
+                    { "var_id": "motor_speed_setpoint", "address": 10, "type": "uint16"  },
+                    { "var_id": "target_temperature",   "address": 12, "type": "float32" },
+                    { "var_id": "motor_enable",         "address": 14, "type": "uint8"   }
                 ]
             }
         }

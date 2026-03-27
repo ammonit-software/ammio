@@ -8,7 +8,7 @@
 
 typedef struct
 {
-    char name[256];
+    char var_id[256];
     var_t var;
     UT_hash_handle hh;
 } var_entry_t;
@@ -36,19 +36,19 @@ type_t var_table_type_from_string(const char *type_str)
     return TYPE_UINT8;
 }
 
-int var_table_add(const char *name, type_t type, dir_t dir)
+int var_table_add(const char *var_id, type_t type, dir_t dir)
 {
     var_entry_t *entry = calloc(1, sizeof(var_entry_t));
     if (!entry)
         return -1;
 
-    strncpy(entry->name, name, 255);
-    strncpy(entry->var.name, name, 255);
+    strncpy(entry->var_id, var_id, 255);
+    strncpy(entry->var.var_id, var_id, 255);
     entry->var.type = type;
     entry->var.dir = dir;
 
     mtx_lock(&var_table_mutex);
-    HASH_ADD_STR(var_table, name, entry);
+    HASH_ADD_STR(var_table, var_id, entry);
     mtx_unlock(&var_table_mutex);
     return 0;
 }
@@ -74,14 +74,14 @@ void var_table_cleanup(void)
     mtx_destroy(&var_table_mutex);
 }
 
-int var_table_get(const char *name, var_t *out)
+int var_table_get(const char *var_id, var_t *out)
 {
-    if (!name || !out)
+    if (!var_id || !out)
         return -1;
 
     var_entry_t *entry = NULL;
     mtx_lock(&var_table_mutex);
-    HASH_FIND_STR(var_table, name, entry);
+    HASH_FIND_STR(var_table, var_id, entry);
     if (entry)
         *out = entry->var;
     mtx_unlock(&var_table_mutex);
@@ -89,14 +89,14 @@ int var_table_get(const char *name, var_t *out)
     return entry ? 0 : -1;
 }
 
-int var_table_set(const char *name, const var_t *in)
+int var_table_set(const char *var_id, const var_t *in)
 {
-    if (!name || !in)
+    if (!var_id || !in)
         return -1;
 
     var_entry_t *entry = NULL;
     mtx_lock(&var_table_mutex);
-    HASH_FIND_STR(var_table, name, entry);
+    HASH_FIND_STR(var_table, var_id, entry);
     if (!entry)
     {
         mtx_unlock(&var_table_mutex);

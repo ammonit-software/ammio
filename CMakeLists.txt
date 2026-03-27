@@ -67,7 +67,7 @@ else()
         ${TRDP_DIR}/src/vos/posix/vos_shared_mem.c
     )
     target_include_directories(trdp PRIVATE ${TRDP_DIR}/src/vos/posix)
-    target_compile_definitions(trdp PUBLIC POSIX LINUX _GNU_SOURCE L_ENDIAN)
+    target_compile_definitions(trdp PUBLIC POSIX LINUX _GNU_SOURCE L_ENDIAN MD_SUPPORT=1)
     target_link_libraries(trdp PUBLIC Threads::Threads rt)
 endif()
 
@@ -137,7 +137,6 @@ set(EXTERNAL_LINK_LIBRARIES
 
 add_executable(ammio
     src/main.c
-    src/config.c
     src/log.c
     src/var_table.c
     src/var_server.c

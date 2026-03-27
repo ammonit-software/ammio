@@ -9,7 +9,7 @@
 #define MODBUS_MAX_REGS 128
 
 typedef struct {
-    char name[MODBUS_MAX_NAME_LEN];
+    char var_id[MODBUS_MAX_NAME_LEN];
     int address;
     type_t type;
     int reg_count;

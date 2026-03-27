@@ -2,6 +2,7 @@
 #include "log.h"
 #include "var_table.h"
 #include "cJSON.h"
+#include "interfaces/interface.h"
 #include <nng/nng.h>
 #include <nng/protocol/reqrep0/rep.h>
 #include <stdio.h>
@@ -43,50 +44,50 @@ static char *make_error(var_error_t code)
 static nng_socket sock;
 static bool running = false;
 
-static char *handle_read(const char *name)
+static char *handle_read(const char *var_id)
 {
     var_t var;
-    if (var_table_get(name, &var) != 0) {
-        log_debug("read: %s (not found)", name);
+    if (var_table_get(var_id, &var) != 0) {
+        log_debug("read: %s (not found)", var_id);
         return make_error(ERR_NOT_FOUND);
     }
 
     cJSON *resp = cJSON_CreateObject();
-    cJSON_AddStringToObject(resp, "name", var.name);
+    cJSON_AddStringToObject(resp, "var_id", var.var_id);
     cJSON_AddNumberToObject(resp, "type", var.type);
     cJSON_AddNumberToObject(resp, "timestamp", (double)var.timestamp);
 
     switch (var.type) {
         case TYPE_UINT8:
-            log_debug("read: %s = %u", name, var.value.u8);
+            log_debug("read: %s = %u", var_id, var.value.u8);
             cJSON_AddNumberToObject(resp, "value", var.value.u8);
             break;
         case TYPE_INT8:
-            log_debug("read: %s = %d", name, var.value.i8);
+            log_debug("read: %s = %d", var_id, var.value.i8);
             cJSON_AddNumberToObject(resp, "value", var.value.i8);
             break;
         case TYPE_UINT16:
-            log_debug("read: %s = %u", name, var.value.u16);
+            log_debug("read: %s = %u", var_id, var.value.u16);
             cJSON_AddNumberToObject(resp, "value", var.value.u16);
             break;
         case TYPE_INT16:
-            log_debug("read: %s = %d", name, var.value.i16);
+            log_debug("read: %s = %d", var_id, var.value.i16);
             cJSON_AddNumberToObject(resp, "value", var.value.i16);
             break;
         case TYPE_UINT32:
-            log_debug("read: %s = %u", name, var.value.u32);
+            log_debug("read: %s = %u", var_id, var.value.u32);
             cJSON_AddNumberToObject(resp, "value", var.value.u32);
             break;
         case TYPE_INT32:
-            log_debug("read: %s = %d", name, var.value.i32);
+            log_debug("read: %s = %d", var_id, var.value.i32);
             cJSON_AddNumberToObject(resp, "value", var.value.i32);
             break;
         case TYPE_FLOAT32:
-            log_debug("read: %s = %f", name, var.value.f32);
+            log_debug("read: %s = %f", var_id, var.value.f32);
             cJSON_AddNumberToObject(resp, "value", var.value.f32);
             break;
         case TYPE_FLOAT64:
-            log_debug("read: %s = %f", name, var.value.f64);
+            log_debug("read: %s = %f", var_id, var.value.f64);
             cJSON_AddNumberToObject(resp, "value", var.value.f64);
             break;
     }
@@ -96,16 +97,16 @@ static char *handle_read(const char *name)
     return str;
 }
 
-static char *handle_write(const char *name, double value)
+static char *handle_write(const char *var_id, double value)
 {
     var_t var;
-    if (var_table_get(name, &var) != 0) {
-        log_debug("write: %s (not found)", name);
+    if (var_table_get(var_id, &var) != 0) {
+        log_debug("write: %s (not found)", var_id);
         return make_error(ERR_NOT_FOUND);
     }
 
     if (var.dir == DIR_OUTPUT) {
-        log_debug("write: %s (read-only)", name);
+        log_debug("write: %s (read-only)", var_id);
         return make_error(ERR_READ_ONLY);
     }
 
@@ -113,39 +114,39 @@ static char *handle_write(const char *name, double value)
     {
     case TYPE_UINT8:
         var.value.u8 = (uint8_t)value;
-        log_debug("write: %s = %u", name, var.value.u8);
+        log_debug("write: %s = %u", var_id, var.value.u8);
         break;
     case TYPE_INT8:
         var.value.i8 = (int8_t)value;
-        log_debug("write: %s = %d", name, var.value.i8);
+        log_debug("write: %s = %d", var_id, var.value.i8);
         break;
     case TYPE_UINT16:
         var.value.u16 = (uint16_t)value;
-        log_debug("write: %s = %u", name, var.value.u16);
+        log_debug("write: %s = %u", var_id, var.value.u16);
         break;
     case TYPE_INT16:
         var.value.i16 = (int16_t)value;
-        log_debug("write: %s = %d", name, var.value.i16);
+        log_debug("write: %s = %d", var_id, var.value.i16);
         break;
     case TYPE_UINT32:
         var.value.u32 = (uint32_t)value;
-        log_debug("write: %s = %u", name, var.value.u32);
+        log_debug("write: %s = %u", var_id, var.value.u32);
         break;
     case TYPE_INT32:
         var.value.i32 = (int32_t)value;
-        log_debug("write: %s = %d", name, var.value.i32);
+        log_debug("write: %s = %d", var_id, var.value.i32);
         break;
     case TYPE_FLOAT32:
         var.value.f32 = (float)value;
-        log_debug("write: %s = %f", name, var.value.f32);
+        log_debug("write: %s = %f", var_id, var.value.f32);
         break;
     case TYPE_FLOAT64:
         var.value.f64 = value;
-        log_debug("write: %s = %f", name, var.value.f64);
+        log_debug("write: %s = %f", var_id, var.value.f64);
         break;
     }
 
-    var_table_set(name, &var);
+    var_table_set(var_id, &var);
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "status", "ok");
@@ -168,7 +169,7 @@ static char *handle_list_vars(void)
 
     for (size_t i = 0; i < count; i++) {
         cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "name", vars[i].name);
+        cJSON_AddStringToObject(item, "var_id", vars[i].var_id);
         cJSON_AddStringToObject(item, "type", var_table_type_to_string(vars[i].type));
         cJSON_AddStringToObject(item, "dir", var_table_dir_to_string(vars[i].dir));
         cJSON_AddItemToArray(arr, item);
@@ -176,6 +177,17 @@ static char *handle_list_vars(void)
 
     free(vars);
     cJSON_AddItemToObject(resp, "vars", arr);
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    return str;
+}
+
+static char *handle_md_request(const char *name)
+{
+    if (interface_md_send(name) != 0)
+        return make_error(ERR_NOT_FOUND);
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "ok");
     char *str = cJSON_PrintUnformatted(resp);
     cJSON_Delete(resp);
     return str;
@@ -221,15 +233,25 @@ static char *process_request(const char *msg)
         return response;
     }
 
-    cJSON *name = cJSON_GetObjectItem(req, "name");
+    if (cmd && cJSON_IsString(cmd) && strcmp(cmd->valuestring, "md_request") == 0) {
+        cJSON *name = cJSON_GetObjectItem(req, "name");
+        if (name && cJSON_IsString(name))
+            response = handle_md_request(name->valuestring);
+        else
+            response = make_error(ERR_INVALID_CMD);
+        cJSON_Delete(req);
+        return response;
+    }
 
-    if (cmd && cJSON_IsString(cmd) && name && cJSON_IsString(name)) {
+    cJSON *var_id = cJSON_GetObjectItem(req, "var_id");
+
+    if (cmd && cJSON_IsString(cmd) && var_id && cJSON_IsString(var_id)) {
         if (strcmp(cmd->valuestring, "read") == 0) {
-            response = handle_read(name->valuestring);
+            response = handle_read(var_id->valuestring);
         } else if (strcmp(cmd->valuestring, "write") == 0) {
             cJSON *value = cJSON_GetObjectItem(req, "value");
             if (value && cJSON_IsNumber(value)) {
-                response = handle_write(name->valuestring, value->valuedouble);
+                response = handle_write(var_id->valuestring, value->valuedouble);
             } else {
                 response = make_error(ERR_MISSING_VALUE);
             }

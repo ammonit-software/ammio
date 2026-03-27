@@ -24,7 +24,7 @@ typedef enum
 
 typedef struct
 {
-    char name[256];
+    char var_id[256];
     type_t type;
     dir_t dir;
     union
@@ -43,11 +43,11 @@ typedef struct
 
 int var_table_init(void);
 void var_table_cleanup(void);
-int var_table_add(const char *name, type_t type, dir_t dir);
+int var_table_add(const char *var_id, type_t type, dir_t dir);
 type_t var_table_type_from_string(const char *type_str);
 
-int var_table_get(const char *name, var_t *out);
-int var_table_set(const char *name, const var_t *in);
+int var_table_get(const char *var_id, var_t *out);
+int var_table_set(const char *var_id, const var_t *in);
 int var_table_get_all(var_t **out, size_t *count);
 
 const char *var_table_type_to_string(type_t type);

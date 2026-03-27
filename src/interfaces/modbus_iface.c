@@ -48,7 +48,7 @@ static int reg_count_for_type(type_t type)
 static void write_to_slave(modbus_reg_t *reg)
 {
     var_t var;
-    if (var_table_get(reg->name, &var) != 0)
+    if (var_table_get(reg->var_id, &var) != 0)
         return;
 
     uint16_t regs[4] = {0};
@@ -96,7 +96,7 @@ static void write_to_slave(modbus_reg_t *reg)
     if (modbus_write_registers(ctx, reg->address, reg->reg_count, regs) == -1)
     {
         log_debug("modbus: write failed for '%s' addr=%d: %s",
-                  reg->name, reg->address, modbus_strerror(errno));
+                  reg->var_id, reg->address, modbus_strerror(errno));
     }
 }
 
@@ -108,7 +108,7 @@ static void read_from_slave(modbus_reg_t *reg)
     if (modbus_read_registers(ctx, reg->address, reg->reg_count, regs) == -1)
     {
         log_debug("modbus: read failed for '%s' addr=%d: %s",
-                  reg->name, reg->address, modbus_strerror(errno));
+                  reg->var_id, reg->address, modbus_strerror(errno));
         return;
     }
 
@@ -147,7 +147,7 @@ static void read_from_slave(modbus_reg_t *reg)
         }
     }
 
-    var_table_set(reg->name, &var);
+    var_table_set(reg->var_id, &var);
 }
 
 // Main protocol loop: write inputs, read outputs, sleep
@@ -212,23 +212,23 @@ static int modbus_iface_init(cJSON *config)
             if (input_count >= MODBUS_MAX_REGS)
                 break;
 
-            cJSON *name    = cJSON_GetObjectItem(item, "name");
+            cJSON *var_id  = cJSON_GetObjectItem(item, "var_id");
             cJSON *address = cJSON_GetObjectItem(item, "address");
             cJSON *type    = cJSON_GetObjectItem(item, "type");
 
-            if (!name || !cJSON_IsString(name))
+            if (!var_id || !cJSON_IsString(var_id))
                 continue;
 
             modbus_reg_t *reg = &input_regs[input_count];
-            strncpy(reg->name, name->valuestring, MODBUS_MAX_NAME_LEN - 1);
+            strncpy(reg->var_id, var_id->valuestring, MODBUS_MAX_NAME_LEN - 1);
             reg->address   = address && cJSON_IsNumber(address) ? (int)address->valuedouble : 0;
             reg->type      = type && cJSON_IsString(type) ?
                              var_table_type_from_string(type->valuestring) : TYPE_UINT16;
             reg->reg_count = reg_count_for_type(reg->type);
 
-            var_table_add(reg->name, reg->type, DIR_INPUT);
+            var_table_add(reg->var_id, reg->type, DIR_INPUT);
             log_debug("modbus: input '%s' addr=%d type=%s regs=%d",
-                      reg->name, reg->address,
+                      reg->var_id, reg->address,
                       type ? type->valuestring : "uint16", reg->reg_count);
             input_count++;
         }
@@ -245,23 +245,23 @@ static int modbus_iface_init(cJSON *config)
             if (output_count >= MODBUS_MAX_REGS)
                 break;
 
-            cJSON *name    = cJSON_GetObjectItem(item, "name");
+            cJSON *var_id  = cJSON_GetObjectItem(item, "var_id");
             cJSON *address = cJSON_GetObjectItem(item, "address");
             cJSON *type    = cJSON_GetObjectItem(item, "type");
 
-            if (!name || !cJSON_IsString(name))
+            if (!var_id || !cJSON_IsString(var_id))
                 continue;
 
             modbus_reg_t *reg = &output_regs[output_count];
-            strncpy(reg->name, name->valuestring, MODBUS_MAX_NAME_LEN - 1);
+            strncpy(reg->var_id, var_id->valuestring, MODBUS_MAX_NAME_LEN - 1);
             reg->address   = address && cJSON_IsNumber(address) ? (int)address->valuedouble : 0;
             reg->type      = type && cJSON_IsString(type) ?
                              var_table_type_from_string(type->valuestring) : TYPE_UINT16;
             reg->reg_count = reg_count_for_type(reg->type);
 
-            var_table_add(reg->name, reg->type, DIR_OUTPUT);
+            var_table_add(reg->var_id, reg->type, DIR_OUTPUT);
             log_debug("modbus: output '%s' addr=%d type=%s regs=%d",
-                      reg->name, reg->address,
+                      reg->var_id, reg->address,
                       type ? type->valuestring : "uint16", reg->reg_count);
             output_count++;
         }

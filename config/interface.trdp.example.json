@@ -12,9 +12,9 @@
                         "period_ms": 100,
                         "size_bits": 32,
                         "variables": [
-                            { "name": "door_is_open",   "offset": 0,  "type": "uint8" },
-                            { "name": "door_is_locked", "offset": 8,  "type": "uint8" },
-                            { "name": "door_fault",     "offset": 16, "type": "uint8" }
+                            { "var_id": "door_is_open",   "offset": 0,  "type": "uint8" },
+                            { "var_id": "door_is_locked", "offset": 8,  "type": "uint8" },
+                            { "var_id": "door_fault",     "offset": 16, "type": "uint8" }
                         ]
                     }
                 ],
@@ -26,9 +26,9 @@
                         "period_ms": 100,
                         "size_bits": 32,
                         "variables": [
-                            { "name": "door_open_cmd",  "offset": 0,  "type": "uint8" },
-                            { "name": "door_close_cmd", "offset": 8,  "type": "uint8" },
-                            { "name": "door_lock_cmd",  "offset": 16, "type": "uint8" }
+                            { "var_id": "door_open_cmd",  "offset": 0,  "type": "uint8" },
+                            { "var_id": "door_close_cmd", "offset": 8,  "type": "uint8" },
+                            { "var_id": "door_lock_cmd",  "offset": 16, "type": "uint8" }
                         ]
                     }
                 ]

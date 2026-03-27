@@ -1,7 +1,8 @@
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include "config.h"
+#include "cJSON.h"
 #include "log.h"
 #include "var_table.h"
 #include "var_server.h"
@@ -18,37 +19,63 @@ static void signal_handler(int sig)
     var_server_stop();
 }
 
+static cJSON *load_json_file(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "Failed to open file: %s\n", path);
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char *data = malloc(len + 1);
+    if (!data) {
+        fclose(f);
+        return NULL;
+    }
+
+    fread(data, 1, len, f);
+    data[len] = '\0';
+    fclose(f);
+
+    cJSON *json = cJSON_Parse(data);
+    free(data);
+
+    if (!json) {
+        fprintf(stderr, "Failed to parse JSON: %s\n", path);
+        return NULL;
+    }
+
+    return json;
+}
+
 int main(int argc, char *argv[])
 {
-    const char *config_path = NULL;
+    const char *endpoint = NULL;
     const char *interface_path = NULL;
+    int log_level = -1;
 
     for (int i = 1; i < argc - 1; i++)
     {
-        if (strcmp(argv[i], "--config") == 0)
-            config_path = argv[++i];
+        if (strcmp(argv[i], "--endpoint") == 0)
+            endpoint = argv[++i];
         else if (strcmp(argv[i], "--interface") == 0)
             interface_path = argv[++i];
+        else if (strcmp(argv[i], "--log-level") == 0)
+            log_level = atoi(argv[++i]);
     }
 
-    if (!config_path || !interface_path)
+    if (!endpoint || !interface_path)
     {
-        fprintf(stderr, "Usage: ammio --config <config.json> --interface <interface.json>\n");
+        fprintf(stderr, "Usage: ammio --endpoint <url> --interface <interface.json> [--log-level <N>]\n");
         return 1;
     }
 
-    if (config_load(config_path) != 0)
-    {
-        return 1;
-    }
-
-    cJSON *log_level = config_get("log_level");
-    if (log_level && cJSON_IsNumber(log_level))
-    {
-        log_set_level(log_level->valueint);
-    }
-
-    log_info("Config loaded: %s", config_path);
+    if (log_level >= 0)
+        log_set_level(log_level);
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
@@ -60,12 +87,10 @@ int main(int argc, char *argv[])
 
     var_table_init();
 
-    // Load interface config and initialize protocols
-    cJSON *interface_config = config_load_json(interface_path);
+    cJSON *interface_config = load_json_file(interface_path);
     if (!interface_config)
-    {
         return 1;
-    }
+
     log_info("Interface loaded: %s", interface_path);
 
     if (interfaces_init_with(interface_config) != 0)
@@ -76,23 +101,14 @@ int main(int argc, char *argv[])
 
     log_info("Variable table initialized");
 
-    cJSON *endpoint = config_get("ammio_endpoint");
-    if (!endpoint || !cJSON_IsString(endpoint))
-    {
-        log_info("Missing ammio_endpoint in config");
-        cJSON_Delete(interface_config);
-        return 1;
-    }
-
-    if (var_server_init(endpoint->valuestring) != 0)
+    if (var_server_init(endpoint) != 0)
     {
         cJSON_Delete(interface_config);
         return 1;
     }
 
-    log_info("Server started on %s", endpoint->valuestring);
+    log_info("Server started on %s", endpoint);
 
-    // Start protocol communication threads
     if (interfaces_start() != 0)
     {
         cJSON_Delete(interface_config);

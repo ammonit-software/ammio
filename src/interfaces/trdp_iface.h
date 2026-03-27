@@ -10,7 +10,7 @@
 
 typedef struct
 {
-    char name[TRDP_MAX_NAME_LEN];
+    char var_id[TRDP_MAX_NAME_LEN];
     uint32_t offset_bits;
     type_t type;
     int bit_index;    // -1 for regular vars; 0..N-1 for bitset members
@@ -32,5 +32,6 @@ typedef struct
 } trdp_container_t;
 
 void trdp_iface_register(void);
+int trdp_md_send(const char *name);
 
 #endif

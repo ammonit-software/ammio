@@ -16,7 +16,7 @@
 #define OPCUA_MAX_EP_LEN    512
 
 typedef struct {
-    char      name[OPCUA_MAX_NAME_LEN];
+    char      var_id[OPCUA_MAX_NAME_LEN];
     type_t    type;
     UA_NodeId node_id;
 } opcua_node_t;
@@ -59,7 +59,7 @@ static UA_NodeId parse_node_id(const char *str)
 static void write_to_server(opcua_node_t *node)
 {
     var_t var;
-    if (var_table_get(node->name, &var) != 0)
+    if (var_table_get(node->var_id, &var) != 0)
         return;
 
     UA_Variant value;
@@ -88,7 +88,7 @@ static void write_to_server(opcua_node_t *node)
 
     UA_StatusCode sc = UA_Client_writeValueAttribute(client, node->node_id, &value);
     if (!UA_StatusCode_isGood(sc))
-        log_debug("opcua: write failed for %s: %s", node->name, UA_StatusCode_name(sc));
+        log_debug("opcua: write failed for %s: %s", node->var_id, UA_StatusCode_name(sc));
 }
 
 // Read a value from the OPC UA server and push it into var_table
@@ -100,7 +100,7 @@ static void read_from_server(opcua_node_t *node)
     UA_StatusCode sc = UA_Client_readValueAttribute(client, node->node_id, &value);
     if (!UA_StatusCode_isGood(sc))
     {
-        log_debug("opcua: read failed for %s: %s", node->name, UA_StatusCode_name(sc));
+        log_debug("opcua: read failed for %s: %s", node->var_id, UA_StatusCode_name(sc));
         UA_Variant_clear(&value);
         return;
     }
@@ -129,7 +129,7 @@ static void read_from_server(opcua_node_t *node)
             return;
     }
 
-    var_table_set(node->name, &var);
+    var_table_set(node->var_id, &var);
     UA_Variant_clear(&value);
 }
 
@@ -216,21 +216,21 @@ static int opcua_iface_init(cJSON *config)
             if (input_count >= OPCUA_MAX_NODES)
                 break;
 
-            cJSON *name    = cJSON_GetObjectItem(item, "name");
+            cJSON *var_id  = cJSON_GetObjectItem(item, "var_id");
             cJSON *node_id = cJSON_GetObjectItem(item, "node_id");
             cJSON *type    = cJSON_GetObjectItem(item, "type");
 
-            if (!name || !cJSON_IsString(name) || !node_id || !cJSON_IsString(node_id))
+            if (!var_id || !cJSON_IsString(var_id) || !node_id || !cJSON_IsString(node_id))
                 continue;
 
             opcua_node_t *node = &input_nodes[input_count];
-            strncpy(node->name, name->valuestring, OPCUA_MAX_NAME_LEN - 1);
+            strncpy(node->var_id, var_id->valuestring, OPCUA_MAX_NAME_LEN - 1);
             node->type    = type && cJSON_IsString(type) ?
                             var_table_type_from_string(type->valuestring) : TYPE_UINT16;
             node->node_id = parse_node_id(node_id->valuestring);
 
-            var_table_add(node->name, node->type, DIR_INPUT);
-            log_debug("opcua: input  %s -> %s", node->name, node_id->valuestring);
+            var_table_add(node->var_id, node->type, DIR_INPUT);
+            log_debug("opcua: input  %s -> %s", node->var_id, node_id->valuestring);
             input_count++;
         }
     }
@@ -244,21 +244,21 @@ static int opcua_iface_init(cJSON *config)
             if (output_count >= OPCUA_MAX_NODES)
                 break;
 
-            cJSON *name    = cJSON_GetObjectItem(item, "name");
+            cJSON *var_id  = cJSON_GetObjectItem(item, "var_id");
             cJSON *node_id = cJSON_GetObjectItem(item, "node_id");
             cJSON *type    = cJSON_GetObjectItem(item, "type");
 
-            if (!name || !cJSON_IsString(name) || !node_id || !cJSON_IsString(node_id))
+            if (!var_id || !cJSON_IsString(var_id) || !node_id || !cJSON_IsString(node_id))
                 continue;
 
             opcua_node_t *node = &output_nodes[output_count];
-            strncpy(node->name, name->valuestring, OPCUA_MAX_NAME_LEN - 1);
+            strncpy(node->var_id, var_id->valuestring, OPCUA_MAX_NAME_LEN - 1);
             node->type    = type && cJSON_IsString(type) ?
                             var_table_type_from_string(type->valuestring) : TYPE_UINT16;
             node->node_id = parse_node_id(node_id->valuestring);
 
-            var_table_add(node->name, node->type, DIR_OUTPUT);
-            log_debug("opcua: output %s <- %s", node->name, node_id->valuestring);
+            var_table_add(node->var_id, node->type, DIR_OUTPUT);
+            log_debug("opcua: output %s <- %s", node->var_id, node_id->valuestring);
             output_count++;
         }
     }

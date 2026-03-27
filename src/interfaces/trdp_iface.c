@@ -11,8 +11,36 @@
 #include "trdp_if_light.h"
 #include "vos_thread.h"
 #include "vos_sock.h"
+#include "iec61375-2-3.h"
 
 #define MAX_CONTAINERS 64
+
+// Message type discriminator for containers
+typedef enum {
+    TRDP_TYPE_PD,
+    TRDP_TYPE_Mn,
+    TRDP_TYPE_Mr,
+    TRDP_TYPE_Mp,
+    TRDP_TYPE_Mq,
+    TRDP_TYPE_Mc,
+    TRDP_TYPE_Me
+} trdp_msg_type_t;
+
+// MD container descriptor
+typedef struct trdp_md_container_s {
+    char name[TRDP_MAX_NAME_LEN];
+    trdp_msg_type_t msg_type;
+    uint32_t comid;
+    char pair_name[TRDP_MAX_NAME_LEN];  // for Mp: name of the paired Mr container
+    char dest_ip[16];
+    uint32_t size_bytes;
+    uint8_t *buffer;
+    trdp_var_mapping_t *variables;
+    size_t var_count;
+    void *listen_handle;                // TRDP_LIS_T, stored as void*
+    atomic_bool pending_send;
+    struct trdp_md_container_s *partner;
+} trdp_md_container_t;
 
 // Module state
 static cJSON *trdp_config = NULL;
@@ -24,6 +52,12 @@ static size_t input_count = 0;
 
 static trdp_container_t output_containers[MAX_CONTAINERS];
 static size_t output_count = 0;
+
+static trdp_md_container_t md_input_containers[MAX_CONTAINERS];
+static size_t md_input_count = 0;
+
+static trdp_md_container_t md_output_containers[MAX_CONTAINERS];
+static size_t md_output_count = 0;
 
 static thrd_t thread_process;
 static atomic_bool running = false;
@@ -98,7 +132,7 @@ static void get_from_var_table(trdp_container_t *container)
         if (mapping->bit_index >= 0)
         {
             var_t var;
-            if (var_table_get(mapping->name, &var) != 0)
+            if (var_table_get(mapping->var_id, &var) != 0)
                 continue;
 
             uint32_t target_byte = bitset_target_byte(byte_offset, mapping->bit_index);
@@ -126,12 +160,12 @@ static void get_from_var_table(trdp_container_t *container)
                 case TYPE_UINT32: { uint32_t v; memcpy(&v, src, 4); var.value.u32 = ntohl(v); break; }
                 default: break;
             }
-            var_table_set(mapping->name, &var);
+            var_table_set(mapping->var_id, &var);
             continue;
         }
 
         var_t var;
-        if (var_table_get(mapping->name, &var) != 0)
+        if (var_table_get(mapping->var_id, &var) != 0)
             continue;
 
         uint8_t *dest = container->buffer + byte_offset;
@@ -214,7 +248,7 @@ static void set_to_var_table(trdp_container_t *container)
             var_t var;
             var.type = TYPE_UINT8;
             var.value.u8 = (container->buffer[target_byte] >> bitset_bit_in_byte(mapping->bit_index)) & 1u;
-            var_table_set(mapping->name, &var);
+            var_table_set(mapping->var_id, &var);
             continue;
         }
 
@@ -276,7 +310,152 @@ static void set_to_var_table(trdp_container_t *container)
             }
         }
 
-        var_table_set(mapping->name, &var);
+        var_table_set(mapping->var_id, &var);
+    }
+}
+
+// Read values from var_table into MD container buffer (no bitset handling)
+static void md_get_from_var_table(trdp_md_container_t *container)
+{
+    for (size_t i = 0; i < container->var_count; i++)
+    {
+        trdp_var_mapping_t *mapping = &container->variables[i];
+        uint32_t byte_offset = mapping->offset_bits / 8;
+
+        if (byte_offset >= container->size_bytes)
+            continue;
+
+        var_t var;
+        if (var_table_get(mapping->var_id, &var) != 0)
+            continue;
+
+        uint8_t *dest = container->buffer + byte_offset;
+
+        switch (mapping->type)
+        {
+            case TYPE_UINT8:
+                *dest = var.value.u8;
+                break;
+            case TYPE_INT8:
+                *(int8_t *)dest = var.value.i8;
+                break;
+            case TYPE_UINT16:
+            {
+                uint16_t val = htons(var.value.u16);
+                memcpy(dest, &val, sizeof(val));
+                break;
+            }
+            case TYPE_INT16:
+            {
+                int16_t val = (int16_t)htons((uint16_t)var.value.i16);
+                memcpy(dest, &val, sizeof(val));
+                break;
+            }
+            case TYPE_UINT32:
+            {
+                uint32_t val = htonl(var.value.u32);
+                memcpy(dest, &val, sizeof(val));
+                break;
+            }
+            case TYPE_INT32:
+            {
+                int32_t val = (int32_t)htonl((uint32_t)var.value.i32);
+                memcpy(dest, &val, sizeof(val));
+                break;
+            }
+            case TYPE_FLOAT32:
+            {
+                uint32_t tmp;
+                memcpy(&tmp, &var.value.f32, sizeof(tmp));
+                tmp = htonl(tmp);
+                memcpy(dest, &tmp, sizeof(tmp));
+                break;
+            }
+            case TYPE_FLOAT64:
+            {
+                uint64_t tmp;
+                memcpy(&tmp, &var.value.f64, sizeof(tmp));
+                uint8_t *p = (uint8_t *)&tmp;
+                uint8_t swapped[8];
+                for (int j = 0; j < 8; j++)
+                    swapped[j] = p[7 - j];
+                memcpy(dest, swapped, sizeof(swapped));
+                break;
+            }
+        }
+    }
+}
+
+// Write values from MD container buffer into var_table (no bitset handling)
+static void md_set_to_var_table(trdp_md_container_t *container)
+{
+    for (size_t i = 0; i < container->var_count; i++)
+    {
+        trdp_var_mapping_t *mapping = &container->variables[i];
+        uint32_t byte_offset = mapping->offset_bits / 8;
+
+        if (byte_offset >= container->size_bytes)
+            continue;
+
+        uint8_t *src = container->buffer + byte_offset;
+        var_t var;
+        var.type = mapping->type;
+
+        switch (mapping->type)
+        {
+            case TYPE_UINT8:
+                var.value.u8 = *src;
+                break;
+            case TYPE_INT8:
+                var.value.i8 = *(int8_t *)src;
+                break;
+            case TYPE_UINT16:
+            {
+                uint16_t val;
+                memcpy(&val, src, sizeof(val));
+                var.value.u16 = ntohs(val);
+                break;
+            }
+            case TYPE_INT16:
+            {
+                int16_t val;
+                memcpy(&val, src, sizeof(val));
+                var.value.i16 = (int16_t)ntohs((uint16_t)val);
+                break;
+            }
+            case TYPE_UINT32:
+            {
+                uint32_t val;
+                memcpy(&val, src, sizeof(val));
+                var.value.u32 = ntohl(val);
+                break;
+            }
+            case TYPE_INT32:
+            {
+                int32_t val;
+                memcpy(&val, src, sizeof(val));
+                var.value.i32 = (int32_t)ntohl((uint32_t)val);
+                break;
+            }
+            case TYPE_FLOAT32:
+            {
+                uint32_t tmp;
+                memcpy(&tmp, src, sizeof(tmp));
+                tmp = ntohl(tmp);
+                memcpy(&var.value.f32, &tmp, sizeof(var.value.f32));
+                break;
+            }
+            case TYPE_FLOAT64:
+            {
+                uint8_t swapped[8];
+                for (int j = 0; j < 8; j++)
+                    swapped[j] = src[7 - j];
+                memcpy(&var.value.f64, swapped, sizeof(var.value.f64));
+                break;
+            }
+        }
+
+        var_table_set(mapping->var_id, &var);
     }
 }
 
@@ -351,12 +530,12 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
         cJSON *var;
         cJSON_ArrayForEach(var, variables)
         {
-            cJSON *var_name = cJSON_GetObjectItem(var, "name");
+            cJSON *var_id_json = cJSON_GetObjectItem(var, "var_id");
             cJSON *var_offset = cJSON_GetObjectItem(var, "offset");
             cJSON *var_type = cJSON_GetObjectItem(var, "type");
             cJSON *var_bits = cJSON_GetObjectItem(var, "bits");
 
-            if (!var_name || !cJSON_IsString(var_name))
+            if (!var_id_json || !cJSON_IsString(var_id_json))
                 continue;
 
             const char *type_str = (var_type && cJSON_IsString(var_type)) ? var_type->valuestring : "uint8";
@@ -380,18 +559,18 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
 
                     trdp_var_mapping_t *mapping = &container->variables[container->var_count];
                     if (bit_name && bit_name[0])
-                        snprintf(mapping->name, TRDP_MAX_NAME_LEN, "%s.%s", var_name->valuestring, bit_name);
+                        snprintf(mapping->var_id, TRDP_MAX_NAME_LEN, "%s.%s", var_id_json->valuestring, bit_name);
                     else
-                        snprintf(mapping->name, TRDP_MAX_NAME_LEN, "%s.bit%d", var_name->valuestring, b);
+                        snprintf(mapping->var_id, TRDP_MAX_NAME_LEN, "%s.bit%d", var_id_json->valuestring, b);
 
                     mapping->offset_bits = offset;
                     mapping->type = TYPE_UINT8;
                     mapping->bit_index = b;
                     mapping->bitset_bytes = bitset_bytes;
 
-                    var_table_add(mapping->name, TYPE_UINT8, dir);
+                    var_table_add(mapping->var_id, TYPE_UINT8, dir);
                     log_debug("trdp: added bit member %s (offset=%u, bit=%d)",
-                             mapping->name, offset, b);
+                             mapping->var_id, offset, b);
                     container->var_count++;
                 }
 
@@ -401,27 +580,27 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
                 else if (bitset_bytes == 4) full_type = TYPE_UINT32;
 
                 trdp_var_mapping_t *full = &container->variables[container->var_count];
-                strncpy(full->name, var_name->valuestring, TRDP_MAX_NAME_LEN - 1);
+                strncpy(full->var_id, var_id_json->valuestring, TRDP_MAX_NAME_LEN - 1);
                 full->offset_bits = offset;
                 full->type = full_type;
                 full->bit_index = -1;
                 full->bitset_bytes = bitset_bytes;
-                var_table_add(full->name, full_type, dir);
-                log_debug("trdp: added bitset var %s (offset=%u, type=%s)", full->name, offset, type_str);
+                var_table_add(full->var_id, full_type, dir);
+                log_debug("trdp: added bitset var %s (offset=%u, type=%s)", full->var_id, offset, type_str);
                 container->var_count++;
             }
             else
             {
                 trdp_var_mapping_t *mapping = &container->variables[container->var_count];
-                strncpy(mapping->name, var_name->valuestring, TRDP_MAX_NAME_LEN - 1);
+                strncpy(mapping->var_id, var_id_json->valuestring, TRDP_MAX_NAME_LEN - 1);
                 mapping->offset_bits = offset;
                 mapping->type = var_table_type_from_string(type_str);
                 mapping->bit_index = -1;
                 mapping->bitset_bytes = 0;
 
-                var_table_add(mapping->name, mapping->type, dir);
+                var_table_add(mapping->var_id, mapping->type, dir);
                 log_debug("trdp: added variable %s (offset=%u, type=%s)",
-                         mapping->name, offset, type_str);
+                         mapping->var_id, offset, type_str);
                 container->var_count++;
             }
         }
@@ -431,7 +610,7 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
     return 0;
 }
 
-// Parse containers from JSON array
+// Parse containers from JSON array, skipping non-PD containers
 static int parse_containers(cJSON *json_array, trdp_container_t *containers, size_t *count, size_t max, dir_t dir)
 {
     *count = 0;
@@ -444,12 +623,265 @@ static int parse_containers(cJSON *json_array, trdp_container_t *containers, siz
         if (*count >= max)
             break;
 
+        // Skip non-PD containers (MD types)
+        cJSON *type_field = cJSON_GetObjectItem(item, "type");
+        if (type_field && cJSON_IsString(type_field) && strcmp(type_field->valuestring, "Pd") != 0)
+            continue;
+
         if (parse_container(item, &containers[*count], dir) == 0)
         {
             (*count)++;
         }
     }
     return 0;
+}
+
+// Map type string to trdp_msg_type_t
+static trdp_msg_type_t parse_msg_type_str(const char *s)
+{
+    if (strcmp(s, "Mn") == 0) return TRDP_TYPE_Mn;
+    if (strcmp(s, "Mr") == 0) return TRDP_TYPE_Mr;
+    if (strcmp(s, "Mp") == 0) return TRDP_TYPE_Mp;
+    if (strcmp(s, "Mq") == 0) return TRDP_TYPE_Mq;
+    if (strcmp(s, "Mc") == 0) return TRDP_TYPE_Mc;
+    if (strcmp(s, "Me") == 0) return TRDP_TYPE_Me;
+    return TRDP_TYPE_PD;
+}
+
+// Parse a single MD container from JSON
+static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t dir, trdp_msg_type_t msg_type)
+{
+    cJSON *name     = cJSON_GetObjectItem(json, "name");
+    cJSON *comid    = cJSON_GetObjectItem(json, "comid");
+    cJSON *dest_ip  = cJSON_GetObjectItem(json, "dest_ip");
+    cJSON *reply_to = cJSON_GetObjectItem(json, "reply_to");
+    cJSON *variables = cJSON_GetObjectItem(json, "variables");
+
+    if (!name || !cJSON_IsString(name))
+    {
+        log_debug("trdp md: container missing name");
+        return -1;
+    }
+
+    memset(container, 0, sizeof(*container));
+    strncpy(container->name, name->valuestring, TRDP_MAX_NAME_LEN - 1);
+    container->msg_type = msg_type;
+    container->comid = comid && cJSON_IsNumber(comid) ? (uint32_t)comid->valuedouble : 0;
+
+    if (dest_ip && cJSON_IsString(dest_ip))
+        strncpy(container->dest_ip, dest_ip->valuestring, 15);
+
+    if (reply_to && cJSON_IsString(reply_to))
+        strncpy(container->pair_name, reply_to->valuestring, TRDP_MAX_NAME_LEN - 1);
+
+    atomic_init(&container->pending_send, false);
+    container->partner = NULL;
+    container->listen_handle = NULL;
+
+    // Calculate size_bytes from variables: max(offset_bits + type_size_bits) / 8
+    uint32_t max_end_bits = 0;
+    container->var_count = 0;
+    container->variables = NULL;
+    container->size_bytes = 0;
+
+    if (variables && cJSON_IsArray(variables))
+    {
+        int num_vars = cJSON_GetArraySize(variables);
+        if (num_vars > 0)
+        {
+            container->variables = calloc((size_t)num_vars, sizeof(trdp_var_mapping_t));
+            if (!container->variables)
+            {
+                log_debug("trdp md: failed to allocate variables for %s", container->name);
+                return -1;
+            }
+
+            cJSON *var;
+            cJSON_ArrayForEach(var, variables)
+            {
+                cJSON *var_id_json = cJSON_GetObjectItem(var, "var_id");
+                cJSON *var_offset  = cJSON_GetObjectItem(var, "offset");
+                cJSON *var_type    = cJSON_GetObjectItem(var, "type");
+
+                if (!var_id_json || !cJSON_IsString(var_id_json))
+                    continue;
+
+                const char *type_str = (var_type && cJSON_IsString(var_type)) ? var_type->valuestring : "uint8";
+                uint32_t offset = (var_offset && cJSON_IsNumber(var_offset)) ? (uint32_t)var_offset->valuedouble : 0;
+
+                type_t vtype = var_table_type_from_string(type_str);
+                size_t vbits = type_size_bits(vtype);
+                uint32_t end_bits = offset + (uint32_t)vbits;
+                if (end_bits > max_end_bits)
+                    max_end_bits = end_bits;
+
+                trdp_var_mapping_t *mapping = &container->variables[container->var_count];
+                strncpy(mapping->var_id, var_id_json->valuestring, TRDP_MAX_NAME_LEN - 1);
+                mapping->offset_bits = offset;
+                mapping->type = vtype;
+                mapping->bit_index = -1;
+                mapping->bitset_bytes = 0;
+
+                var_table_add(mapping->var_id, vtype, dir);
+                log_debug("trdp md: added variable %s (offset=%u, type=%s)", mapping->var_id, offset, type_str);
+                container->var_count++;
+            }
+        }
+    }
+
+    container->size_bytes = (max_end_bits + 7) / 8;
+    if (container->size_bytes == 0)
+        container->size_bytes = 1;
+
+    container->buffer = calloc(1, container->size_bytes);
+    if (!container->buffer)
+    {
+        log_debug("trdp md: failed to allocate buffer for %s", container->name);
+        free(container->variables);
+        container->variables = NULL;
+        return -1;
+    }
+
+    return 0;
+}
+
+// Parse MD containers from JSON array (skip PD containers)
+static int parse_md_containers(cJSON *json_array, trdp_md_container_t *containers, size_t *count, size_t max, dir_t dir)
+{
+    if (!json_array || !cJSON_IsArray(json_array))
+        return 0;
+
+    cJSON *item;
+    cJSON_ArrayForEach(item, json_array)
+    {
+        if (*count >= max)
+            break;
+
+        cJSON *type_field = cJSON_GetObjectItem(item, "type");
+        if (!type_field || !cJSON_IsString(type_field))
+            continue;
+
+        const char *type_str = type_field->valuestring;
+        if (strcmp(type_str, "Pd") == 0)
+            continue;
+
+        trdp_msg_type_t msg_type = parse_msg_type_str(type_str);
+        if (parse_md_container(item, &containers[*count], dir, msg_type) == 0)
+        {
+            (*count)++;
+        }
+    }
+    return 0;
+}
+
+// Link Mp<->Mr partners after parsing
+static void link_md_partners(void)
+{
+    // outputs.Mp → inputs.Mr (ammio is Caller: sends Mr, receives Mp)
+    for (size_t i = 0; i < md_output_count; i++)
+    {
+        trdp_md_container_t *mp = &md_output_containers[i];
+        if (mp->msg_type != TRDP_TYPE_Mp || mp->pair_name[0] == '\0')
+            continue;
+
+        for (size_t j = 0; j < md_input_count; j++)
+        {
+            trdp_md_container_t *mr = &md_input_containers[j];
+            if (mr->msg_type == TRDP_TYPE_Mr && strcmp(mr->name, mp->pair_name) == 0)
+            {
+                mp->partner = mr;
+                mr->partner = mp;
+                log_debug("trdp md: linked Mr '%s' <-> Mp '%s'", mr->name, mp->name);
+                break;
+            }
+        }
+    }
+
+    // inputs.Mp → outputs.Mr (SUT is Caller: sends Mr, ammio replies with Mp)
+    for (size_t i = 0; i < md_input_count; i++)
+    {
+        trdp_md_container_t *mp = &md_input_containers[i];
+        if (mp->msg_type != TRDP_TYPE_Mp || mp->pair_name[0] == '\0')
+            continue;
+
+        for (size_t j = 0; j < md_output_count; j++)
+        {
+            trdp_md_container_t *mr = &md_output_containers[j];
+            if (mr->msg_type == TRDP_TYPE_Mr && strcmp(mr->name, mp->pair_name) == 0)
+            {
+                mp->partner = mr;
+                mr->partner = mp;
+                log_debug("trdp md: linked output Mr '%s' <-> input Mp '%s'", mr->name, mp->name);
+                break;
+            }
+        }
+    }
+}
+
+// MD message callback — called by TRDP library for received MD messages
+static void md_callback(
+    void *pRefCon,
+    TRDP_APP_SESSION_T appHandle,
+    const TRDP_MD_INFO_T *pMsg,
+    UINT8 *pData,
+    UINT32 dataSize)
+{
+    (void)appHandle;
+
+    if (!pMsg || !pRefCon)
+        return;
+
+    if (pMsg->resultCode != TRDP_NO_ERR)
+    {
+        log_debug("trdp md: callback error %d for comid=%u", pMsg->resultCode, pMsg->comId);
+        return;
+    }
+
+    trdp_md_container_t *container = (trdp_md_container_t *)pRefCon;
+
+    if (pMsg->msgType == TRDP_MSG_MN || pMsg->msgType == TRDP_MSG_MP)
+    {
+        // Received notification or reply: copy data into buffer and update var_table
+        if (pData && dataSize > 0 && container->buffer)
+        {
+            uint32_t copy_size = dataSize < container->size_bytes ? dataSize : container->size_bytes;
+            memcpy(container->buffer, pData, copy_size);
+        }
+        md_set_to_var_table(container);
+        log_debug("trdp md: received %s for '%s' (comid=%u)",
+                  pMsg->msgType == TRDP_MSG_MN ? "Mn" : "Mp", container->name, pMsg->comId);
+    }
+    else if (pMsg->msgType == TRDP_MSG_MR)
+    {
+        // Received request from SUT: read reply data and send Mp back
+        trdp_md_container_t *reply_container = container->partner;
+        if (!reply_container)
+        {
+            log_debug("trdp md: received Mr for '%s' but no Mp partner configured", container->name);
+            return;
+        }
+
+        md_get_from_var_table(reply_container);
+
+        TRDP_ERR_T err = tlm_reply(
+            app_handle,
+            &pMsg->sessionId,
+            reply_container->comid,
+            0,
+            NULL,
+            reply_container->buffer,
+            reply_container->size_bytes,
+            NULL);
+
+        if (err != TRDP_NO_ERR)
+        {
+            log_debug("trdp md: tlm_reply failed for '%s': %d", reply_container->name, err);
+        }
+        else
+        {
+            log_debug("trdp md: replied Mp '%s' to Mr '%s'", reply_container->name, container->name);
+        }
+    }
 }
 
 // Main protocol loop
@@ -463,7 +895,7 @@ static int thread_process_func(void *arg)
 
     while (running)
     {
-        // Send: get values from var_table and publish to protocol bus
+        // Send PD: get values from var_table and publish to protocol bus
         for (size_t i = 0; i < input_count; i++)
         {
             trdp_container_t *container = &input_containers[i];
@@ -476,6 +908,80 @@ static int thread_process_func(void *arg)
                 {
                     log_debug("trdp: tlp_put failed for %s: %d", container->name, err);
                 }
+            }
+        }
+
+        // Send MD: process pending MD send requests
+        for (size_t i = 0; i < md_input_count; i++)
+        {
+            trdp_md_container_t *container = &md_input_containers[i];
+
+            if (!atomic_load(&container->pending_send))
+                continue;
+
+            atomic_store(&container->pending_send, false);
+
+            if (container->dest_ip[0] == '\0')
+            {
+                log_debug("trdp md: no dest_ip for '%s', skipping send", container->name);
+                continue;
+            }
+
+            md_get_from_var_table(container);
+            TRDP_IP_ADDR_T dest = parse_ip(container->dest_ip);
+
+            if (container->msg_type == TRDP_TYPE_Mn)
+            {
+                err = tlm_notify(
+                    app_handle,
+                    NULL,
+                    NULL,
+                    container->comid,
+                    0, 0, 0,
+                    dest,
+                    TRDP_FLAGS_DEFAULT,
+                    NULL,
+                    container->buffer,
+                    container->size_bytes,
+                    NULL,
+                    NULL);
+
+                if (err != TRDP_NO_ERR)
+                    log_debug("trdp md: tlm_notify failed for '%s': %d", container->name, err);
+                else
+                    log_debug("trdp md: sent Mn '%s' (comid=%u)", container->name, container->comid);
+            }
+            else if (container->msg_type == TRDP_TYPE_Mr)
+            {
+                trdp_md_container_t *reply_container = container->partner;
+                if (!reply_container)
+                {
+                    log_debug("trdp md: Mr '%s' has no Mp partner, skipping", container->name);
+                    continue;
+                }
+
+                TRDP_UUID_T session_id;
+                err = tlm_request(
+                    app_handle,
+                    reply_container,
+                    md_callback,
+                    &session_id,
+                    container->comid,
+                    0, 0, 0,
+                    dest,
+                    TRDP_FLAGS_DEFAULT,
+                    1,
+                    3000000,
+                    NULL,
+                    container->buffer,
+                    container->size_bytes,
+                    NULL,
+                    NULL);
+
+                if (err != TRDP_NO_ERR)
+                    log_debug("trdp md: tlm_request failed for '%s': %d", container->name, err);
+                else
+                    log_debug("trdp md: sent Mr '%s' (comid=%u)", container->name, container->comid);
             }
         }
 
@@ -500,7 +1006,7 @@ static int thread_process_func(void *arg)
             log_debug("trdp: tlc_process failed: %d", err);
         }
 
-        // Receive: get values from protocol bus and set into var_table
+        // Receive PD: get values from protocol bus and set into var_table
         for (size_t i = 0; i < output_count; i++)
         {
             trdp_container_t *container = &output_containers[i];
@@ -547,21 +1053,38 @@ static int trdp_init(cJSON *config)
         return 0;
     }
 
-    // Parse inputs (ammio publishes to SUT)
+    // Parse PD inputs (ammio publishes to SUT)
     cJSON *inputs = cJSON_GetObjectItem(containers, "inputs");
     if (inputs)
     {
         parse_containers(inputs, input_containers, &input_count, MAX_CONTAINERS, DIR_INPUT);
-        log_debug("trdp: parsed %zu input containers", input_count);
+        log_debug("trdp: parsed %zu PD input containers", input_count);
     }
 
-    // Parse outputs (ammio subscribes from SUT)
+    // Parse PD outputs (ammio subscribes from SUT)
     cJSON *outputs = cJSON_GetObjectItem(containers, "outputs");
     if (outputs)
     {
         parse_containers(outputs, output_containers, &output_count, MAX_CONTAINERS, DIR_OUTPUT);
-        log_debug("trdp: parsed %zu output containers", output_count);
+        log_debug("trdp: parsed %zu PD output containers", output_count);
     }
+
+    // Parse MD input containers (ammio sends MD to SUT)
+    if (inputs)
+    {
+        parse_md_containers(inputs, md_input_containers, &md_input_count, MAX_CONTAINERS, DIR_INPUT);
+        log_debug("trdp: parsed %zu MD input containers", md_input_count);
+    }
+
+    // Parse MD output containers (SUT sends MD to ammio)
+    if (outputs)
+    {
+        parse_md_containers(outputs, md_output_containers, &md_output_count, MAX_CONTAINERS, DIR_OUTPUT);
+        log_debug("trdp: parsed %zu MD output containers", md_output_count);
+    }
+
+    // Link Mr<->Mp partners
+    link_md_partners();
 
     return 0;
 }
@@ -589,7 +1112,7 @@ static int trdp_start(void)
     }
     log_debug("trdp: session opened");
 
-    // Create publishers for input containers
+    // Create publishers for PD input containers
     for (size_t i = 0; i < input_count; i++)
     {
         trdp_container_t *container = &input_containers[i];
@@ -615,7 +1138,7 @@ static int trdp_start(void)
         }
     }
 
-    // Create subscribers for output containers
+    // Create subscribers for PD output containers
     for (size_t i = 0; i < output_count; i++)
     {
         trdp_container_t *container = &output_containers[i];
@@ -638,6 +1161,41 @@ static int trdp_start(void)
             container->handle = sub_handle;
             log_debug("trdp: subscribed to %s (comid=%u, src=%s)",
                     container->name, container->comid, container->multicast_ip);
+        }
+    }
+
+    // Register MD listeners for output containers that receive Mn or Mr from SUT
+    for (size_t i = 0; i < md_output_count; i++)
+    {
+        trdp_md_container_t *container = &md_output_containers[i];
+
+        if (container->msg_type != TRDP_TYPE_Mn && container->msg_type != TRDP_TYPE_Mr)
+            continue;
+
+        TRDP_LIS_T lis_handle;
+        err = tlm_addListener(
+            app_handle,
+            &lis_handle,
+            container,
+            md_callback,
+            TRUE,
+            container->comid,
+            0, 0, 0, 0, 0,
+            TRDP_FLAGS_DEFAULT,
+            NULL,
+            NULL);
+
+        if (err != TRDP_NO_ERR)
+        {
+            log_debug("trdp md: tlm_addListener failed for '%s' (comid=%u): %d",
+                      container->name, container->comid, err);
+        }
+        else
+        {
+            container->listen_handle = lis_handle;
+            log_debug("trdp md: listening for %s '%s' (comid=%u)",
+                      container->msg_type == TRDP_TYPE_Mn ? "Mn" : "Mr",
+                      container->name, container->comid);
         }
     }
 
@@ -669,7 +1227,17 @@ static void trdp_stop(void)
     thrd_join(thread_process, NULL);
     log_debug("trdp: process thread stopped");
 
-    // Unpublish all input containers
+    // Remove MD listeners for output containers
+    for (size_t i = 0; i < md_output_count; i++)
+    {
+        if (md_output_containers[i].listen_handle)
+        {
+            tlm_delListener(app_handle, (TRDP_LIS_T)md_output_containers[i].listen_handle);
+            md_output_containers[i].listen_handle = NULL;
+        }
+    }
+
+    // Unpublish all PD input containers
     for (size_t i = 0; i < input_count; i++)
     {
         if (input_containers[i].handle)
@@ -683,7 +1251,7 @@ static void trdp_stop(void)
         input_containers[i].variables = NULL;
     }
 
-    // Unsubscribe all output containers
+    // Unsubscribe all PD output containers
     for (size_t i = 0; i < output_count; i++)
     {
         if (output_containers[i].handle)
@@ -697,6 +1265,26 @@ static void trdp_stop(void)
         output_containers[i].variables = NULL;
     }
 
+    // Free MD input containers
+    for (size_t i = 0; i < md_input_count; i++)
+    {
+        free(md_input_containers[i].buffer);
+        md_input_containers[i].buffer = NULL;
+        free(md_input_containers[i].variables);
+        md_input_containers[i].variables = NULL;
+    }
+    md_input_count = 0;
+
+    // Free MD output containers
+    for (size_t i = 0; i < md_output_count; i++)
+    {
+        free(md_output_containers[i].buffer);
+        md_output_containers[i].buffer = NULL;
+        free(md_output_containers[i].variables);
+        md_output_containers[i].variables = NULL;
+    }
+    md_output_count = 0;
+
     // Close session and terminate
     if (app_handle)
     {
@@ -707,11 +1295,26 @@ static void trdp_stop(void)
     log_debug("trdp: terminated");
 }
 
+// Find an MD input container by name and mark it for sending
+int trdp_md_send(const char *name)
+{
+    for (size_t i = 0; i < md_input_count; i++)
+    {
+        if (strcmp(md_input_containers[i].name, name) == 0)
+        {
+            atomic_store(&md_input_containers[i].pending_send, true);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static interface_t trdp_interface = {
     .name = "trdp",
     .init = trdp_init,
     .start = trdp_start,
-    .stop = trdp_stop
+    .stop = trdp_stop,
+    .md_send = trdp_md_send
 };
 
 void trdp_iface_register(void)
