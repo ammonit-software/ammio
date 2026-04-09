@@ -158,31 +158,46 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                                                     // use "0.0.0.0" for the default interface
                                                     // loopback (127.0.0.1) is not supported
             "containers": {
-                "inputs": [                         // PD containers ammio publishes (SUT inputs)
+                "inputs": [                         // containers ammio sends (SUT inputs)
                     {
                         "name": "DOOR_STATUS",      // container name, used for logging
+                        "enable_id": "DOOR_STATUS.is_enabled", // var_table key for the enable flag — must be unique
+                        "type": "Pd",               // Pd: process data (periodic). Mn: MD notify. Mr: MD request.
                         "comid": 2000,              // TRDP communication ID, must match SUT dataset
-                        "multicast_ip": "239.255.1.2", // multicast group IP for this dataset
-                        "period_ms": 100,           // publish interval in ms
-                        "size_bits": 32,            // total payload size in bits, must match SUT dataset
+                        "multicast_ip": "239.255.1.2", // multicast group IP (Pd only)
+                        "period_ms": 100,           // publish interval in ms (Pd only)
+                        "size_bits": 32,            // total payload size in bits (Pd only)
                         "variables": [              // variable mappings packed inside this container
                             {
-                                "var_id": "door_is_open", // variable identifier in var_table and JSON API
+                                "name": "door_is_open", // human-readable variable name
+                                "var_id": "door_is_open", // unique key in var_table and JSON API
                                 "offset": 0,        // bit offset within the container payload
                                 "type": "uint8"     // uint8 int8 uint16 int16 uint32 int32 float32 float64
                             }
                         ]
+                    },
+                    {
+                        "name": "ttdb_notification", // MD Mn example — one-shot notify sent to SUT
+                        "enable_id": "ttdb_notification.is_enabled", // write 1 to fire; auto-resets to 0 after send
+                        "type": "Mn",
+                        "comid": 101,
+                        "dest_ip": "239.255.0.1",   // unicast or multicast destination
+                        "variables": [
+                            { "name": "etbId", "var_id": "etbId", "offset": 0, "type": "uint8" }
+                        ]
                     }
                 ],
-                "outputs": [                        // PD containers ammio subscribes to (SUT outputs)
+                "outputs": [                        // containers ammio receives (SUT outputs)
                     {
                         "name": "DOOR_CONTROL",
+                        "enable_id": "DOOR_CONTROL.is_enabled",
+                        "type": "Pd",
                         "comid": 1000,
                         "multicast_ip": "239.255.1.1",
                         "period_ms": 100,
                         "size_bits": 32,
                         "variables": [
-                            { "var_id": "door_open_cmd", "offset": 0, "type": "uint8" }
+                            { "name": "door_open_cmd", "var_id": "door_open_cmd", "offset": 0, "type": "uint8" }
                         ]
                     }
                 ]

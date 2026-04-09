@@ -20,6 +20,7 @@ typedef struct
 typedef struct
 {
     char name[TRDP_MAX_NAME_LEN];
+    char enable_id[TRDP_MAX_NAME_LEN];
     uint32_t comid;
     char multicast_ip[16];
     uint32_t period_ms;
@@ -32,6 +33,5 @@ typedef struct
 } trdp_container_t;
 
 void trdp_iface_register(void);
-int trdp_md_send(const char *name);
 
 #endif

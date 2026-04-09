@@ -1,7 +1,7 @@
 #ifndef INTERFACE_H
 #define INTERFACE_H
 
-#include "../config.h"
+#include "cJSON.h"
 
 typedef struct {
     const char *name;

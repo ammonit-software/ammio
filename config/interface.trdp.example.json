@@ -7,28 +7,30 @@
                 "inputs": [
                     {
                         "name": "DOOR_STATUS",
+                        "enable_id": "DOOR_STATUS.is_enabled",
                         "comid": 2000,
                         "multicast_ip": "239.255.1.2",
                         "period_ms": 100,
                         "size_bits": 32,
                         "variables": [
-                            { "var_id": "door_is_open",   "offset": 0,  "type": "uint8" },
-                            { "var_id": "door_is_locked", "offset": 8,  "type": "uint8" },
-                            { "var_id": "door_fault",     "offset": 16, "type": "uint8" }
+                            { "name": "door_is_open",   "var_id": "door_is_open",   "offset": 0,  "type": "uint8" },
+                            { "name": "door_is_locked", "var_id": "door_is_locked", "offset": 8,  "type": "uint8" },
+                            { "name": "door_fault",     "var_id": "door_fault",     "offset": 16, "type": "uint8" }
                         ]
                     }
                 ],
                 "outputs": [
                     {
                         "name": "DOOR_CONTROL",
+                        "enable_id": "DOOR_CONTROL.is_enabled",
                         "comid": 1000,
                         "multicast_ip": "239.255.1.1",
                         "period_ms": 100,
                         "size_bits": 32,
                         "variables": [
-                            { "var_id": "door_open_cmd",  "offset": 0,  "type": "uint8" },
-                            { "var_id": "door_close_cmd", "offset": 8,  "type": "uint8" },
-                            { "var_id": "door_lock_cmd",  "offset": 16, "type": "uint8" }
+                            { "name": "door_open_cmd",  "var_id": "door_open_cmd",  "offset": 0,  "type": "uint8" },
+                            { "name": "door_close_cmd", "var_id": "door_close_cmd", "offset": 8,  "type": "uint8" },
+                            { "name": "door_lock_cmd",  "var_id": "door_lock_cmd",  "offset": 16, "type": "uint8" }
                         ]
                     }
                 ]

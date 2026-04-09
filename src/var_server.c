@@ -182,16 +182,6 @@ static char *handle_list_vars(void)
     return str;
 }
 
-static char *handle_md_request(const char *name)
-{
-    if (interface_md_send(name) != 0)
-        return make_error(ERR_NOT_FOUND);
-    cJSON *resp = cJSON_CreateObject();
-    cJSON_AddStringToObject(resp, "status", "ok");
-    char *str = cJSON_PrintUnformatted(resp);
-    cJSON_Delete(resp);
-    return str;
-}
 
 static char *handle_list_errors(void)
 {
@@ -233,15 +223,6 @@ static char *process_request(const char *msg)
         return response;
     }
 
-    if (cmd && cJSON_IsString(cmd) && strcmp(cmd->valuestring, "md_request") == 0) {
-        cJSON *name = cJSON_GetObjectItem(req, "name");
-        if (name && cJSON_IsString(name))
-            response = handle_md_request(name->valuestring);
-        else
-            response = make_error(ERR_INVALID_CMD);
-        cJSON_Delete(req);
-        return response;
-    }
 
     cJSON *var_id = cJSON_GetObjectItem(req, "var_id");
 

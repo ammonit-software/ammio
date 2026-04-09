@@ -29,6 +29,7 @@ typedef enum {
 // MD container descriptor
 typedef struct trdp_md_container_s {
     char name[TRDP_MAX_NAME_LEN];
+    char enable_id[TRDP_MAX_NAME_LEN];
     trdp_msg_type_t msg_type;
     uint32_t comid;
     char pair_name[TRDP_MAX_NAME_LEN];  // for Mp: name of the paired Mr container
@@ -38,7 +39,7 @@ typedef struct trdp_md_container_s {
     trdp_var_mapping_t *variables;
     size_t var_count;
     void *listen_handle;                // TRDP_LIS_T, stored as void*
-    atomic_bool pending_send;
+    uint8_t prev_enabled;               // previous enable value, for rising-edge detection (MD input)
     struct trdp_md_container_s *partner;
 } trdp_md_container_t;
 
@@ -61,6 +62,33 @@ static size_t md_output_count = 0;
 
 static thrd_t thread_process;
 static atomic_bool running = false;
+
+// Enable flag helpers — enable_id is the var_table key, read directly from the container's enable_id field
+static void register_enable(const char *enable_id, uint8_t default_val)
+{
+    var_table_add(enable_id, TYPE_UINT8, DIR_INPUT);
+    var_t v;
+    if (var_table_get(enable_id, &v) == 0)
+    {
+        v.value.u8 = default_val;
+        var_table_set(enable_id, &v);
+    }
+}
+
+static uint8_t get_enable(const char *enable_id)
+{
+    var_t v;
+    if (var_table_get(enable_id, &v) != 0) return 0;
+    return v.value.u8;
+}
+
+static void set_enable(const char *enable_id, uint8_t val)
+{
+    var_t v;
+    if (var_table_get(enable_id, &v) != 0) return;
+    v.value.u8 = val;
+    var_table_set(enable_id, &v);
+}
 
 // Returns bitset field size in bytes for "bitset8/16/32", or 0 if not a bitset type.
 static int bitset_size_bytes(const char *type_str)
@@ -462,8 +490,9 @@ static void md_set_to_var_table(trdp_md_container_t *container)
 // Parse container from JSON and populate structure
 static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
 {
-    cJSON *name = cJSON_GetObjectItem(json, "name");
-    cJSON *comid = cJSON_GetObjectItem(json, "comid");
+    cJSON *name      = cJSON_GetObjectItem(json, "name");
+    cJSON *enable_id = cJSON_GetObjectItem(json, "enable_id");
+    cJSON *comid     = cJSON_GetObjectItem(json, "comid");
     cJSON *multicast_ip = cJSON_GetObjectItem(json, "multicast_ip");
     cJSON *period_ms = cJSON_GetObjectItem(json, "period_ms");
     cJSON *size_bits = cJSON_GetObjectItem(json, "size_bits");
@@ -474,8 +503,14 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
         log_debug("trdp: container missing name");
         return -1;
     }
+    if (!enable_id || !cJSON_IsString(enable_id))
+    {
+        log_debug("trdp: container '%s' missing enable_id", name->valuestring);
+        return -1;
+    }
 
-    strncpy(container->name, name->valuestring, TRDP_MAX_NAME_LEN - 1);
+    strncpy(container->name,      name->valuestring,      TRDP_MAX_NAME_LEN - 1);
+    strncpy(container->enable_id, enable_id->valuestring, TRDP_MAX_NAME_LEN - 1);
     container->comid = comid && cJSON_IsNumber(comid) ? (uint32_t)comid->valuedouble : 0;
 
     if (multicast_ip && cJSON_IsString(multicast_ip))
@@ -607,6 +642,7 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
     }
 
     container->handle = NULL;
+    register_enable(container->enable_id, 1);
     return 0;
 }
 
@@ -651,10 +687,11 @@ static trdp_msg_type_t parse_msg_type_str(const char *s)
 // Parse a single MD container from JSON
 static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t dir, trdp_msg_type_t msg_type)
 {
-    cJSON *name     = cJSON_GetObjectItem(json, "name");
-    cJSON *comid    = cJSON_GetObjectItem(json, "comid");
-    cJSON *dest_ip  = cJSON_GetObjectItem(json, "dest_ip");
-    cJSON *reply_to = cJSON_GetObjectItem(json, "reply_to");
+    cJSON *name      = cJSON_GetObjectItem(json, "name");
+    cJSON *enable_id = cJSON_GetObjectItem(json, "enable_id");
+    cJSON *comid     = cJSON_GetObjectItem(json, "comid");
+    cJSON *dest_ip   = cJSON_GetObjectItem(json, "dest_ip");
+    cJSON *reply_to  = cJSON_GetObjectItem(json, "reply_to");
     cJSON *variables = cJSON_GetObjectItem(json, "variables");
 
     if (!name || !cJSON_IsString(name))
@@ -662,9 +699,15 @@ static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t
         log_debug("trdp md: container missing name");
         return -1;
     }
+    if (!enable_id || !cJSON_IsString(enable_id))
+    {
+        log_debug("trdp md: container '%s' missing enable_id", name->valuestring);
+        return -1;
+    }
 
     memset(container, 0, sizeof(*container));
-    strncpy(container->name, name->valuestring, TRDP_MAX_NAME_LEN - 1);
+    strncpy(container->name,      name->valuestring,      TRDP_MAX_NAME_LEN - 1);
+    strncpy(container->enable_id, enable_id->valuestring, TRDP_MAX_NAME_LEN - 1);
     container->msg_type = msg_type;
     container->comid = comid && cJSON_IsNumber(comid) ? (uint32_t)comid->valuedouble : 0;
 
@@ -674,7 +717,7 @@ static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t
     if (reply_to && cJSON_IsString(reply_to))
         strncpy(container->pair_name, reply_to->valuestring, TRDP_MAX_NAME_LEN - 1);
 
-    atomic_init(&container->pending_send, false);
+    container->prev_enabled = 0;
     container->partner = NULL;
     container->listen_handle = NULL;
 
@@ -742,6 +785,9 @@ static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t
         return -1;
     }
 
+    // DIR_INPUT = ammio sends (Mn/Mr trigger): start disabled
+    // DIR_OUTPUT = ammio receives: start enabled so var_table is always updated
+    register_enable(container->enable_id, dir == DIR_INPUT ? 0 : 1);
     return 0;
 }
 
@@ -841,6 +887,9 @@ static void md_callback(
 
     if (pMsg->msgType == TRDP_MSG_MN || pMsg->msgType == TRDP_MSG_MP)
     {
+        if (!get_enable(container->enable_id))
+            return;
+
         // Received notification or reply: copy data into buffer and update var_table
         if (pData && dataSize > 0 && container->buffer)
         {
@@ -899,7 +948,7 @@ static int thread_process_func(void *arg)
         for (size_t i = 0; i < input_count; i++)
         {
             trdp_container_t *container = &input_containers[i];
-            if (container->handle)
+            if (container->handle && get_enable(container->enable_id))
             {
                 get_from_var_table(container);
                 err = tlp_put(app_handle, (TRDP_PUB_T)container->handle,
@@ -911,15 +960,19 @@ static int thread_process_func(void *arg)
             }
         }
 
-        // Send MD: process pending MD send requests
+        // Send MD: fire on rising edge of enable_id flag, then auto-reset
         for (size_t i = 0; i < md_input_count; i++)
         {
             trdp_md_container_t *container = &md_input_containers[i];
 
-            if (!atomic_load(&container->pending_send))
-                continue;
+            uint8_t current = get_enable(container->enable_id);
+            uint8_t prev    = container->prev_enabled;
+            container->prev_enabled = current;
 
-            atomic_store(&container->pending_send, false);
+            if (!prev && current)
+                set_enable(container->enable_id, 0);  // auto-reset before sending
+            else
+                continue;
 
             if (container->dest_ip[0] == '\0')
             {
@@ -1010,7 +1063,7 @@ static int thread_process_func(void *arg)
         for (size_t i = 0; i < output_count; i++)
         {
             trdp_container_t *container = &output_containers[i];
-            if (container->handle)
+            if (container->handle && get_enable(container->enable_id))
             {
                 TRDP_PD_INFO_T pd_info;
                 UINT32 recv_size = container->size_bytes;
@@ -1295,26 +1348,11 @@ static void trdp_stop(void)
     log_debug("trdp: terminated");
 }
 
-// Find an MD input container by name and mark it for sending
-int trdp_md_send(const char *name)
-{
-    for (size_t i = 0; i < md_input_count; i++)
-    {
-        if (strcmp(md_input_containers[i].name, name) == 0)
-        {
-            atomic_store(&md_input_containers[i].pending_send, true);
-            return 0;
-        }
-    }
-    return -1;
-}
-
 static interface_t trdp_interface = {
     .name = "trdp",
     .init = trdp_init,
     .start = trdp_start,
     .stop = trdp_stop,
-    .md_send = trdp_md_send
 };
 
 void trdp_iface_register(void)
