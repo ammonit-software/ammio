@@ -9,6 +9,10 @@
 #include "../compat/net.h"
 
 #include "trdp_if_light.h"
+#include "trdp_private.h"
+#include "trdp_utils.h"
+#include "vos_mem.h"
+#include "vos_utils.h"
 #include "vos_thread.h"
 #include "vos_sock.h"
 #include "iec61375-2-3.h"
@@ -933,6 +937,164 @@ static void md_callback(
     }
 }
 
+static void init_direct_mp_sender(MD_ELE_T *sender, trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
+{
+    memset(sender, 0, sizeof(*sender));
+    sender->socketIdx = TRDP_INVALID_SOCKET_INDEX;
+    sender->pktFlags = app_handle->mdDefault.flags;
+    sender->pfCbFunction = app_handle->mdDefault.pfCbFunction;
+    sender->addr.comId = container->comid;
+    sender->addr.srcIpAddr = app_handle->realIP;
+    sender->addr.destIpAddr = dest;
+    sender->addr.etbTopoCnt = 0u;
+    sender->addr.opTrnTopoCnt = 0u;
+    sender->addr.mcGroup = vos_isMulticast(dest) ? dest : 0u;
+    sender->privFlags = TRDP_PRIV_NONE;
+    sender->dataSize = container->size_bytes;
+    sender->grossSize = trdp_packetSizeMD(container->size_bytes);
+    sender->stateEle = TRDP_ST_TX_REPLY_ARM;
+    vos_getUuid(sender->sessionID);
+}
+
+static void fill_direct_mp_packet(MD_ELE_T *sender, trdp_md_container_t *container)
+{
+    UINT32 marshalled_size = container->size_bytes;
+
+    memset(sender->pPacket, 0, sender->grossSize);
+    sender->pPacket->frameHead.sequenceCounter = 0u;
+    sender->pPacket->frameHead.protocolVersion = vos_htons(TRDP_PROTO_VER);
+    sender->pPacket->frameHead.msgType = vos_htons((UINT16)TRDP_MSG_MP);
+    sender->pPacket->frameHead.comId = vos_htonl(sender->addr.comId);
+    sender->pPacket->frameHead.etbTopoCnt = vos_htonl(sender->addr.etbTopoCnt);
+    sender->pPacket->frameHead.opTrnTopoCnt = vos_htonl(sender->addr.opTrnTopoCnt);
+    sender->pPacket->frameHead.datasetLength = vos_htonl(sender->dataSize);
+    sender->pPacket->frameHead.replyStatus = (INT32)vos_htonl((UINT32)TRDP_REPLY_OK);
+    memcpy(sender->pPacket->frameHead.sessionID, sender->sessionID, TRDP_SESS_ID_SIZE);
+    sender->pPacket->frameHead.replyTimeout = 0u;
+
+    if ((sender->pktFlags & TRDP_FLAGS_MARSHALL) && app_handle->marshall.pfCbMarshall != NULL)
+    {
+        (void)app_handle->marshall.pfCbMarshall(
+            app_handle->marshall.pRefCon,
+            sender->addr.comId,
+            container->buffer,
+            container->size_bytes,
+            sender->pPacket->data,
+            &marshalled_size,
+            &sender->pCachedDS);
+        sender->pPacket->frameHead.datasetLength = vos_htonl(marshalled_size);
+        sender->grossSize = trdp_packetSizeMD(marshalled_size);
+        sender->dataSize = marshalled_size;
+    }
+    else if (container->size_bytes > 0u)
+    {
+        memcpy(sender->pPacket->data, container->buffer, container->size_bytes);
+    }
+}
+
+static TRDP_ERR_T queue_direct_mp_send(trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
+{
+    TRDP_ERR_T err;
+    MD_ELE_T *sender;
+
+    if (!app_handle)
+        return TRDP_NOINIT_ERR;
+
+    if (vos_mutexLock(app_handle->mutexMD) != VOS_NO_ERR)
+        return TRDP_MUTEX_ERR;
+
+    sender = (MD_ELE_T *)vos_memAlloc(sizeof(MD_ELE_T));
+    if (!sender)
+    {
+        (void)vos_mutexUnlock(app_handle->mutexMD);
+        return TRDP_MEM_ERR;
+    }
+
+    init_direct_mp_sender(sender, container, dest);
+
+    err = trdp_requestSocket(
+        app_handle->ifaceMD,
+        app_handle->mdDefault.udpPort,
+        &app_handle->mdDefault.sendParam,
+        sender->addr.srcIpAddr,
+        sender->addr.mcGroup,
+        TRDP_SOCK_MD_UDP,
+        app_handle->option,
+        FALSE,
+        VOS_INVALID_SOCKET,
+        &sender->socketIdx,
+        0);
+    if (err != TRDP_NO_ERR)
+    {
+        trdp_mdFreeSession(sender);
+        (void)vos_mutexUnlock(app_handle->mutexMD);
+        return err;
+    }
+
+    sender->pPacket = (MD_PACKET_T *)vos_memAlloc(sender->grossSize);
+    if (!sender->pPacket)
+    {
+        trdp_mdFreeSession(sender);
+        (void)vos_mutexUnlock(app_handle->mutexMD);
+        return TRDP_MEM_ERR;
+    }
+
+    fill_direct_mp_packet(sender, container);
+    trdp_MDqueueAppLast(&app_handle->pMDSndQueue, sender);
+    (void)vos_mutexUnlock(app_handle->mutexMD);
+    return TRDP_NO_ERR;
+}
+
+static TRDP_ERR_T send_md_notification(trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
+{
+    return tlm_notify(
+        app_handle,
+        NULL,
+        NULL,
+        container->comid,
+        0,
+        0,
+        0,
+        dest,
+        TRDP_FLAGS_DEFAULT,
+        NULL,
+        container->buffer,
+        container->size_bytes,
+        NULL,
+        NULL);
+}
+
+static TRDP_ERR_T send_md_request(trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
+{
+    trdp_md_container_t *reply_container = container->partner;
+    TRDP_UUID_T session_id;
+
+    if (!reply_container)
+    {
+        log_debug("trdp md: Mr '%s' has no Mp partner, skipping", container->name);
+        return TRDP_NO_ERR;
+    }
+
+    return tlm_request(
+        app_handle,
+        reply_container,
+        md_callback,
+        &session_id,
+        container->comid,
+        0,
+        0,
+        0,
+        dest,
+        TRDP_FLAGS_DEFAULT,
+        1,
+        3000000,
+        NULL,
+        container->buffer,
+        container->size_bytes,
+        NULL,
+        NULL);
+}
+
 // Main protocol loop
 static int thread_process_func(void *arg)
 {
@@ -985,55 +1147,26 @@ static int thread_process_func(void *arg)
 
             if (container->msg_type == TRDP_TYPE_Mn)
             {
-                err = tlm_notify(
-                    app_handle,
-                    NULL,
-                    NULL,
-                    container->comid,
-                    0, 0, 0,
-                    dest,
-                    TRDP_FLAGS_DEFAULT,
-                    NULL,
-                    container->buffer,
-                    container->size_bytes,
-                    NULL,
-                    NULL);
-
+                err = send_md_notification(container, dest);
                 if (err != TRDP_NO_ERR)
                     log_debug("trdp md: tlm_notify failed for '%s': %d", container->name, err);
                 else
                     log_debug("trdp md: sent Mn '%s' (comid=%u)", container->name, container->comid);
             }
+            else if (container->msg_type == TRDP_TYPE_Mp)
+            {
+                err = queue_direct_mp_send(container, dest);
+                if (err != TRDP_NO_ERR)
+                    log_debug("trdp md: direct Mp queue failed for '%s': %d", container->name, err);
+                else
+                    log_debug("trdp md: queued direct Mp '%s' (comid=%u)", container->name, container->comid);
+            }
             else if (container->msg_type == TRDP_TYPE_Mr)
             {
-                trdp_md_container_t *reply_container = container->partner;
-                if (!reply_container)
-                {
-                    log_debug("trdp md: Mr '%s' has no Mp partner, skipping", container->name);
-                    continue;
-                }
-
-                TRDP_UUID_T session_id;
-                err = tlm_request(
-                    app_handle,
-                    reply_container,
-                    md_callback,
-                    &session_id,
-                    container->comid,
-                    0, 0, 0,
-                    dest,
-                    TRDP_FLAGS_DEFAULT,
-                    1,
-                    3000000,
-                    NULL,
-                    container->buffer,
-                    container->size_bytes,
-                    NULL,
-                    NULL);
-
+                err = send_md_request(container, dest);
                 if (err != TRDP_NO_ERR)
                     log_debug("trdp md: tlm_request failed for '%s': %d", container->name, err);
-                else
+                else if (container->partner)
                     log_debug("trdp md: sent Mr '%s' (comid=%u)", container->name, container->comid);
             }
         }

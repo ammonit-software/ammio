@@ -162,7 +162,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                     {
                         "name": "DOOR_STATUS",      // container name, used for logging
                         "enable_id": "DOOR_STATUS.is_enabled", // var_table key for the enable flag — must be unique
-                        "type": "Pd",               // Pd: process data (periodic). Mn: MD notify. Mr: MD request.
+                        "type": "Pd",               // Pd: process data (periodic). Mn: MD notify. Mr: MD request. Mp: MD reply.
                         "comid": 2000,              // TRDP communication ID, must match SUT dataset
                         "multicast_ip": "239.255.1.2", // multicast group IP (Pd only)
                         "period_ms": 100,           // publish interval in ms (Pd only)
@@ -206,6 +206,13 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
     }
 }
 ```
+
+For TRDP MD containers in `inputs`:
+
+- `Mn`: raising `enable_id` sends one notification.
+- `Mr`: raising `enable_id` sends one request and waits for the paired `Mp`.
+- `Mp`: if the paired `Mr` arrives from the SUT, ammio replies automatically via `reply_to` as before. In addition, raising `enable_id` queues and sends one proactive `Mp` directly to `dest_ip`.
+- Proactive `Mn`, `Mr`, and `Mp` sends require `dest_ip` to point to the SUT or multicast destination. If `dest_ip` is missing, ammio skips the send.
 
 #### OPC UA
 
