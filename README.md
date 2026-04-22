@@ -211,8 +211,8 @@ For TRDP MD containers in `inputs`:
 
 - `Mn`: raising `enable_id` sends one notification.
 - `Mr`: raising `enable_id` sends one request and waits for the paired `Mp`.
-- `Mp`: if the paired `Mr` arrives from the SUT, ammio replies automatically via `reply_to` as before. In addition, raising `enable_id` queues and sends one proactive `Mp` directly to `dest_ip`.
-- Proactive `Mn`, `Mr`, and `Mp` sends require `dest_ip` to point to the SUT or multicast destination. If `dest_ip` is missing, ammio skips the send.
+- `Mp`: if the paired `Mr` arrives from the SUT, ammio replies automatically via `reply_to`.
+- Proactive `Mn` and `Mr` sends require `dest_ip` to point to the SUT or multicast destination. If `dest_ip` is missing, ammio skips the send.
 
 #### OPC UA
 

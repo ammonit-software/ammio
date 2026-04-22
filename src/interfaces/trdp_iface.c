@@ -50,6 +50,7 @@ typedef struct trdp_md_container_s {
 // Module state
 static cJSON *trdp_config = NULL;
 static char local_ip[16] = "0.0.0.0";
+static UINT16 source_port = 0u;
 static TRDP_APP_SESSION_T app_handle = NULL;
 
 static trdp_container_t input_containers[MAX_CONTAINERS];
@@ -878,8 +879,11 @@ static void md_callback(
 {
     (void)appHandle;
 
-    if (!pMsg || !pRefCon)
+    if (!pMsg || !pMsg->pUserRef)
         return;
+
+    log_debug("trdp md: callback fired msgType=0x%04x comid=%u resultCode=%d userRef=%p",
+              pMsg->msgType, pMsg->comId, pMsg->resultCode, pMsg->pUserRef);
 
     if (pMsg->resultCode != TRDP_NO_ERR)
     {
@@ -887,7 +891,7 @@ static void md_callback(
         return;
     }
 
-    trdp_md_container_t *container = (trdp_md_container_t *)pRefCon;
+    trdp_md_container_t *container = (trdp_md_container_t *)pMsg->pUserRef;
 
     if (pMsg->msgType == TRDP_MSG_MN || pMsg->msgType == TRDP_MSG_MP)
     {
@@ -935,114 +939,6 @@ static void md_callback(
             log_debug("trdp md: replied Mp '%s' to Mr '%s'", reply_container->name, container->name);
         }
     }
-}
-
-static void init_direct_mp_sender(MD_ELE_T *sender, trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
-{
-    memset(sender, 0, sizeof(*sender));
-    sender->socketIdx = TRDP_INVALID_SOCKET_INDEX;
-    sender->pktFlags = app_handle->mdDefault.flags;
-    sender->pfCbFunction = app_handle->mdDefault.pfCbFunction;
-    sender->addr.comId = container->comid;
-    sender->addr.srcIpAddr = app_handle->realIP;
-    sender->addr.destIpAddr = dest;
-    sender->addr.etbTopoCnt = 0u;
-    sender->addr.opTrnTopoCnt = 0u;
-    sender->addr.mcGroup = vos_isMulticast(dest) ? dest : 0u;
-    sender->privFlags = TRDP_PRIV_NONE;
-    sender->dataSize = container->size_bytes;
-    sender->grossSize = trdp_packetSizeMD(container->size_bytes);
-    sender->stateEle = TRDP_ST_TX_REPLY_ARM;
-    vos_getUuid(sender->sessionID);
-}
-
-static void fill_direct_mp_packet(MD_ELE_T *sender, trdp_md_container_t *container)
-{
-    UINT32 marshalled_size = container->size_bytes;
-
-    memset(sender->pPacket, 0, sender->grossSize);
-    sender->pPacket->frameHead.sequenceCounter = 0u;
-    sender->pPacket->frameHead.protocolVersion = vos_htons(TRDP_PROTO_VER);
-    sender->pPacket->frameHead.msgType = vos_htons((UINT16)TRDP_MSG_MP);
-    sender->pPacket->frameHead.comId = vos_htonl(sender->addr.comId);
-    sender->pPacket->frameHead.etbTopoCnt = vos_htonl(sender->addr.etbTopoCnt);
-    sender->pPacket->frameHead.opTrnTopoCnt = vos_htonl(sender->addr.opTrnTopoCnt);
-    sender->pPacket->frameHead.datasetLength = vos_htonl(sender->dataSize);
-    sender->pPacket->frameHead.replyStatus = (INT32)vos_htonl((UINT32)TRDP_REPLY_OK);
-    memcpy(sender->pPacket->frameHead.sessionID, sender->sessionID, TRDP_SESS_ID_SIZE);
-    sender->pPacket->frameHead.replyTimeout = 0u;
-
-    if ((sender->pktFlags & TRDP_FLAGS_MARSHALL) && app_handle->marshall.pfCbMarshall != NULL)
-    {
-        (void)app_handle->marshall.pfCbMarshall(
-            app_handle->marshall.pRefCon,
-            sender->addr.comId,
-            container->buffer,
-            container->size_bytes,
-            sender->pPacket->data,
-            &marshalled_size,
-            &sender->pCachedDS);
-        sender->pPacket->frameHead.datasetLength = vos_htonl(marshalled_size);
-        sender->grossSize = trdp_packetSizeMD(marshalled_size);
-        sender->dataSize = marshalled_size;
-    }
-    else if (container->size_bytes > 0u)
-    {
-        memcpy(sender->pPacket->data, container->buffer, container->size_bytes);
-    }
-}
-
-static TRDP_ERR_T queue_direct_mp_send(trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
-{
-    TRDP_ERR_T err;
-    MD_ELE_T *sender;
-
-    if (!app_handle)
-        return TRDP_NOINIT_ERR;
-
-    if (vos_mutexLock(app_handle->mutexMD) != VOS_NO_ERR)
-        return TRDP_MUTEX_ERR;
-
-    sender = (MD_ELE_T *)vos_memAlloc(sizeof(MD_ELE_T));
-    if (!sender)
-    {
-        (void)vos_mutexUnlock(app_handle->mutexMD);
-        return TRDP_MEM_ERR;
-    }
-
-    init_direct_mp_sender(sender, container, dest);
-
-    err = trdp_requestSocket(
-        app_handle->ifaceMD,
-        app_handle->mdDefault.udpPort,
-        &app_handle->mdDefault.sendParam,
-        sender->addr.srcIpAddr,
-        sender->addr.mcGroup,
-        TRDP_SOCK_MD_UDP,
-        app_handle->option,
-        FALSE,
-        VOS_INVALID_SOCKET,
-        &sender->socketIdx,
-        0);
-    if (err != TRDP_NO_ERR)
-    {
-        trdp_mdFreeSession(sender);
-        (void)vos_mutexUnlock(app_handle->mutexMD);
-        return err;
-    }
-
-    sender->pPacket = (MD_PACKET_T *)vos_memAlloc(sender->grossSize);
-    if (!sender->pPacket)
-    {
-        trdp_mdFreeSession(sender);
-        (void)vos_mutexUnlock(app_handle->mutexMD);
-        return TRDP_MEM_ERR;
-    }
-
-    fill_direct_mp_packet(sender, container);
-    trdp_MDqueueAppLast(&app_handle->pMDSndQueue, sender);
-    (void)vos_mutexUnlock(app_handle->mutexMD);
-    return TRDP_NO_ERR;
 }
 
 static TRDP_ERR_T send_md_notification(trdp_md_container_t *container, TRDP_IP_ADDR_T dest)
@@ -1153,14 +1049,6 @@ static int thread_process_func(void *arg)
                 else
                     log_debug("trdp md: sent Mn '%s' (comid=%u)", container->name, container->comid);
             }
-            else if (container->msg_type == TRDP_TYPE_Mp)
-            {
-                err = queue_direct_mp_send(container, dest);
-                if (err != TRDP_NO_ERR)
-                    log_debug("trdp md: direct Mp queue failed for '%s': %d", container->name, err);
-                else
-                    log_debug("trdp md: queued direct Mp '%s' (comid=%u)", container->name, container->comid);
-            }
             else if (container->msg_type == TRDP_TYPE_Mr)
             {
                 err = send_md_request(container, dest);
@@ -1231,6 +1119,14 @@ static int trdp_init(cJSON *config)
     }
     log_debug("trdp: local_ip = %s", local_ip);
 
+    // Parse source_port (optional — 0 means OS-assigned)
+    cJSON *source_port_json = cJSON_GetObjectItem(config, "source_port");
+    if (source_port_json && cJSON_IsNumber(source_port_json))
+    {
+        source_port = (UINT16)source_port_json->valueint;
+    }
+    log_debug("trdp: source_port = %u", (unsigned)source_port);
+
     // Parse containers
     cJSON *containers = cJSON_GetObjectItem(config, "containers");
     if (!containers)
@@ -1275,6 +1171,74 @@ static int trdp_init(cJSON *config)
     return 0;
 }
 
+/* Pre-bind a send socket to a fixed source port.
+ * Must be called BEFORE any tlp_publish / tlm_addListener so that trdp_requestSocket
+ * finds this socket and reuses it instead of creating a new one with port 0.
+ *
+ * Strategy: call trdp_requestSocket to let TCNopen create and register the socket
+ * the normal way (so the iface table and high-water mark are updated correctly).
+ * Then close the OS socket it created (which was bound to port 0) and replace it
+ * with a new socket bound to src_port. On Windows, sockets can't be rebound, so
+ * the replacement is necessary. */
+static void prebind_send_socket(TRDP_SOCKETS_T iface[],
+                                TRDP_SOCK_TYPE_T type,
+                                UINT16 trdp_port,
+                                const TRDP_SEND_PARAM_T *sendParam,
+                                TRDP_IP_ADDR_T bind_addr,
+                                TRDP_OPTION_T options,
+                                UINT16 src_port)
+{
+    INT32 sock_idx = TRDP_INVALID_SOCKET_INDEX;
+    TRDP_ERR_T err = trdp_requestSocket(iface, trdp_port, sendParam,
+                                        bind_addr, 0u, type, options,
+                                        FALSE, VOS_INVALID_SOCKET,
+                                        &sock_idx, 0u);
+    if (err != TRDP_NO_ERR || sock_idx == TRDP_INVALID_SOCKET_INDEX)
+    {
+        log_debug("trdp: prebind: trdp_requestSocket failed (%d)", (int)err);
+        return;
+    }
+
+    /* Close the socket TCNopen just created (bound to port 0) */
+    vos_sockClose(iface[sock_idx].sock);
+    iface[sock_idx].sock = VOS_INVALID_SOCKET;
+
+    /* Open a new socket with the same options */
+    VOS_SOCK_OPT_T opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.qos           = sendParam->qos;
+    opts.ttl           = sendParam->ttl;
+    opts.ttl_multicast = sendParam->ttl;
+    opts.reuseAddrPort = (options & TRDP_OPTION_NO_REUSE_ADDR) ? FALSE : TRUE;
+    opts.nonBlocking   = (type == TRDP_SOCK_MD_UDP) ? TRUE
+                         : ((options & TRDP_OPTION_BLOCK) ? FALSE : TRUE);
+
+    VOS_SOCK_T new_sock;
+    if (vos_sockOpenUDP(&new_sock, &opts) != VOS_NO_ERR)
+    {
+        log_debug("trdp: prebind: vos_sockOpenUDP failed");
+        return;
+    }
+
+    if (vos_sockBind(new_sock, bind_addr, src_port) != VOS_NO_ERR)
+    {
+        log_debug("trdp: prebind: vos_sockBind to port %u failed", (unsigned)src_port);
+        vos_sockClose(new_sock);
+        return;
+    }
+
+    if (bind_addr != 0u)
+    {
+        (void)vos_sockSetMulticastIf(new_sock, bind_addr);
+    }
+
+    /* Install the pre-bound socket into the iface table slot TCNopen reserved */
+    iface[sock_idx].sock = new_sock;
+
+    log_debug("trdp: pre-bound %s send socket (slot %d) to port %u",
+              (type == TRDP_SOCK_PD) ? "PD" : "MD", (int)sock_idx, (unsigned)src_port);
+}
+
 static int trdp_start(void)
 {
     TRDP_ERR_T err;
@@ -1297,6 +1261,22 @@ static int trdp_start(void)
         return -1;
     }
     log_debug("trdp: session opened");
+
+    // Pre-bind send sockets to a fixed source port before any pub/sub is created.
+    // trdp_requestSocket reuses a pre-existing socket when parameters match,
+    // so this guarantees the desired source port on all outgoing packets.
+    if (source_port != 0u)
+    {
+        TRDP_SESSION_PT s = (TRDP_SESSION_PT)app_handle;
+        prebind_send_socket(s->ifacePD, TRDP_SOCK_PD,
+                            s->pdDefault.port, &s->pdDefault.sendParam,
+                            own_ip, s->option, source_port);
+#if MD_SUPPORT
+        prebind_send_socket(s->ifaceMD, TRDP_SOCK_MD_UDP,
+                            s->mdDefault.udpPort, &s->mdDefault.sendParam,
+                            own_ip, s->option, source_port);
+#endif
+    }
 
     // Create publishers for PD input containers
     for (size_t i = 0; i < input_count; i++)
