@@ -19,7 +19,6 @@
 
 #define MAX_CONTAINERS 64
 
-// Message type discriminator for containers
 typedef enum {
     TRDP_TYPE_PD,
     TRDP_TYPE_Mn,
@@ -30,7 +29,6 @@ typedef enum {
     TRDP_TYPE_Me
 } trdp_msg_type_t;
 
-// MD container descriptor
 typedef struct trdp_md_container_s {
     char name[TRDP_MAX_NAME_LEN];
     char enable_id[TRDP_MAX_NAME_LEN];
@@ -38,6 +36,7 @@ typedef struct trdp_md_container_s {
     uint32_t comid;
     char pair_name[TRDP_MAX_NAME_LEN];  // for Mp: name of the paired Mr container
     char dest_ip[16];
+    TRDP_IP_ADDR_T dest_ip_addr;        // parsed once at init
     uint32_t size_bytes;
     uint8_t *buffer;
     trdp_var_mapping_t *variables;
@@ -47,8 +46,6 @@ typedef struct trdp_md_container_s {
     struct trdp_md_container_s *partner;
 } trdp_md_container_t;
 
-// Module state
-static cJSON *trdp_config = NULL;
 static char local_ip[16] = "0.0.0.0";
 static UINT16 source_port = 0u;
 static TRDP_APP_SESSION_T app_handle = NULL;
@@ -104,7 +101,6 @@ static int bitset_size_bytes(const char *type_str)
     return 0;
 }
 
-// Byte offset of a bit within a TRDP bitset field.
 // TRDP bit numbering: bit 0 is the MSB of the first byte, bit 7 is the LSB of the first byte,
 // bit 8 is the MSB of the second byte, etc.
 static inline uint32_t bitset_target_byte(uint32_t base, int bit_index)
@@ -117,7 +113,6 @@ static inline int bitset_bit_in_byte(int bit_index)
     return 7 - (bit_index % 8);
 }
 
-// Get byte size for a type
 static size_t type_size_bits(type_t type)
 {
     switch (type)
@@ -139,7 +134,6 @@ static size_t type_size_bits(type_t type)
     }
 }
 
-// Parse IP address string to TRDP_IP_ADDR_T
 static TRDP_IP_ADDR_T parse_ip(const char *ip_str)
 {
     struct in_addr addr;
@@ -150,7 +144,114 @@ static TRDP_IP_ADDR_T parse_ip(const char *ip_str)
     return 0;
 }
 
-// Read values from var_table into packet buffer (for publishing inputs)
+// Float64 big-endian byte swap (TRDP wire format)
+static inline void swap64(const void *src, void *dst)
+{
+    const uint8_t *s = (const uint8_t *)src;
+    uint8_t *d = (uint8_t *)dst;
+    for (int j = 0; j < 8; j++) d[j] = s[7 - j];
+}
+
+static void marshal_scalar_to_buffer(uint8_t *dest, const var_t *var)
+{
+    switch (var->type)
+    {
+        case TYPE_UINT8:
+            *dest = var->value.u8;
+            break;
+        case TYPE_INT8:
+            *(int8_t *)dest = var->value.i8;
+            break;
+        case TYPE_UINT16:
+        {
+            uint16_t val = htons(var->value.u16);
+            memcpy(dest, &val, sizeof(val));
+            break;
+        }
+        case TYPE_INT16:
+        {
+            int16_t val = (int16_t)htons((uint16_t)var->value.i16);
+            memcpy(dest, &val, sizeof(val));
+            break;
+        }
+        case TYPE_UINT32:
+        {
+            uint32_t val = htonl(var->value.u32);
+            memcpy(dest, &val, sizeof(val));
+            break;
+        }
+        case TYPE_INT32:
+        {
+            int32_t val = (int32_t)htonl((uint32_t)var->value.i32);
+            memcpy(dest, &val, sizeof(val));
+            break;
+        }
+        case TYPE_FLOAT32:
+        {
+            uint32_t tmp;
+            memcpy(&tmp, &var->value.f32, sizeof(tmp));
+            tmp = htonl(tmp);
+            memcpy(dest, &tmp, sizeof(tmp));
+            break;
+        }
+        case TYPE_FLOAT64:
+            swap64(&var->value.f64, dest);
+            break;
+    }
+}
+
+static void unmarshal_scalar_from_buffer(var_t *var, const uint8_t *src)
+{
+    switch (var->type)
+    {
+        case TYPE_UINT8:
+            var->value.u8 = *src;
+            break;
+        case TYPE_INT8:
+            var->value.i8 = *(int8_t *)src;
+            break;
+        case TYPE_UINT16:
+        {
+            uint16_t val;
+            memcpy(&val, src, sizeof(val));
+            var->value.u16 = ntohs(val);
+            break;
+        }
+        case TYPE_INT16:
+        {
+            int16_t val;
+            memcpy(&val, src, sizeof(val));
+            var->value.i16 = (int16_t)ntohs((uint16_t)val);
+            break;
+        }
+        case TYPE_UINT32:
+        {
+            uint32_t val;
+            memcpy(&val, src, sizeof(val));
+            var->value.u32 = ntohl(val);
+            break;
+        }
+        case TYPE_INT32:
+        {
+            int32_t val;
+            memcpy(&val, src, sizeof(val));
+            var->value.i32 = (int32_t)ntohl((uint32_t)val);
+            break;
+        }
+        case TYPE_FLOAT32:
+        {
+            uint32_t tmp;
+            memcpy(&tmp, src, sizeof(tmp));
+            tmp = ntohl(tmp);
+            memcpy(&var->value.f32, &tmp, sizeof(var->value.f32));
+            break;
+        }
+        case TYPE_FLOAT64:
+            swap64(src, &var->value.f64);
+            break;
+    }
+}
+
 static void get_from_var_table(trdp_container_t *container)
 {
     for (size_t i = 0; i < container->var_count; i++)
@@ -161,7 +262,6 @@ static void get_from_var_table(trdp_container_t *container)
         if (byte_offset >= container->size_bytes)
             continue;
 
-        // Bitset member: apply bit value into buffer
         if (mapping->bit_index >= 0)
         {
             var_t var;
@@ -201,65 +301,10 @@ static void get_from_var_table(trdp_container_t *container)
         if (var_table_get(mapping->var_id, &var) != 0)
             continue;
 
-        uint8_t *dest = container->buffer + byte_offset;
-
-        switch (mapping->type)
-        {
-            case TYPE_UINT8:
-                *dest = var.value.u8;
-                break;
-            case TYPE_INT8:
-                *(int8_t *)dest = var.value.i8;
-                break;
-            case TYPE_UINT16:
-            {
-                uint16_t val = htons(var.value.u16);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_INT16:
-            {
-                int16_t val = (int16_t)htons((uint16_t)var.value.i16);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_UINT32:
-            {
-                uint32_t val = htonl(var.value.u32);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_INT32:
-            {
-                int32_t val = (int32_t)htonl((uint32_t)var.value.i32);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_FLOAT32:
-            {
-                uint32_t tmp;
-                memcpy(&tmp, &var.value.f32, sizeof(tmp));
-                tmp = htonl(tmp);
-                memcpy(dest, &tmp, sizeof(tmp));
-                break;
-            }
-            case TYPE_FLOAT64:
-            {
-                uint64_t tmp;
-                memcpy(&tmp, &var.value.f64, sizeof(tmp));
-                // Convert to network byte order (big endian)
-                uint8_t *p = (uint8_t *)&tmp;
-                uint8_t swapped[8];
-                for (int j = 0; j < 8; j++)
-                    swapped[j] = p[7 - j];
-                memcpy(dest, swapped, sizeof(swapped));
-                break;
-            }
-        }
+        marshal_scalar_to_buffer(container->buffer + byte_offset, &var);
     }
 }
 
-// Write values from packet buffer into var_table (for received outputs)
 static void set_to_var_table(trdp_container_t *container)
 {
     for (size_t i = 0; i < container->var_count; i++)
@@ -270,7 +315,6 @@ static void set_to_var_table(trdp_container_t *container)
         if (byte_offset >= container->size_bytes)
             continue;
 
-        // Bitset member: extract the bit and store as uint8 (0 or 1)
         if (mapping->bit_index >= 0)
         {
             uint32_t target_byte = bitset_target_byte(byte_offset, mapping->bit_index);
@@ -285,69 +329,13 @@ static void set_to_var_table(trdp_container_t *container)
             continue;
         }
 
-        uint8_t *src = container->buffer + byte_offset;
         var_t var;
         var.type = mapping->type;
-
-        switch (mapping->type)
-        {
-            case TYPE_UINT8:
-                var.value.u8 = *src;
-                break;
-            case TYPE_INT8:
-                var.value.i8 = *(int8_t *)src;
-                break;
-            case TYPE_UINT16:
-            {
-                uint16_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.u16 = ntohs(val);
-                break;
-            }
-            case TYPE_INT16:
-            {
-                int16_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.i16 = (int16_t)ntohs((uint16_t)val);
-                break;
-            }
-            case TYPE_UINT32:
-            {
-                uint32_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.u32 = ntohl(val);
-                break;
-            }
-            case TYPE_INT32:
-            {
-                int32_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.i32 = (int32_t)ntohl((uint32_t)val);
-                break;
-            }
-            case TYPE_FLOAT32:
-            {
-                uint32_t tmp;
-                memcpy(&tmp, src, sizeof(tmp));
-                tmp = ntohl(tmp);
-                memcpy(&var.value.f32, &tmp, sizeof(var.value.f32));
-                break;
-            }
-            case TYPE_FLOAT64:
-            {
-                uint8_t swapped[8];
-                for (int j = 0; j < 8; j++)
-                    swapped[j] = src[7 - j];
-                memcpy(&var.value.f64, swapped, sizeof(var.value.f64));
-                break;
-            }
-        }
-
+        unmarshal_scalar_from_buffer(&var, container->buffer + byte_offset);
         var_table_set(mapping->var_id, &var);
     }
 }
 
-// Read values from var_table into MD container buffer (no bitset handling)
 static void md_get_from_var_table(trdp_md_container_t *container)
 {
     for (size_t i = 0; i < container->var_count; i++)
@@ -362,64 +350,10 @@ static void md_get_from_var_table(trdp_md_container_t *container)
         if (var_table_get(mapping->var_id, &var) != 0)
             continue;
 
-        uint8_t *dest = container->buffer + byte_offset;
-
-        switch (mapping->type)
-        {
-            case TYPE_UINT8:
-                *dest = var.value.u8;
-                break;
-            case TYPE_INT8:
-                *(int8_t *)dest = var.value.i8;
-                break;
-            case TYPE_UINT16:
-            {
-                uint16_t val = htons(var.value.u16);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_INT16:
-            {
-                int16_t val = (int16_t)htons((uint16_t)var.value.i16);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_UINT32:
-            {
-                uint32_t val = htonl(var.value.u32);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_INT32:
-            {
-                int32_t val = (int32_t)htonl((uint32_t)var.value.i32);
-                memcpy(dest, &val, sizeof(val));
-                break;
-            }
-            case TYPE_FLOAT32:
-            {
-                uint32_t tmp;
-                memcpy(&tmp, &var.value.f32, sizeof(tmp));
-                tmp = htonl(tmp);
-                memcpy(dest, &tmp, sizeof(tmp));
-                break;
-            }
-            case TYPE_FLOAT64:
-            {
-                uint64_t tmp;
-                memcpy(&tmp, &var.value.f64, sizeof(tmp));
-                uint8_t *p = (uint8_t *)&tmp;
-                uint8_t swapped[8];
-                for (int j = 0; j < 8; j++)
-                    swapped[j] = p[7 - j];
-                memcpy(dest, swapped, sizeof(swapped));
-                break;
-            }
-        }
+        marshal_scalar_to_buffer(container->buffer + byte_offset, &var);
     }
 }
 
-// Write values from MD container buffer into var_table (no bitset handling)
 static void md_set_to_var_table(trdp_md_container_t *container)
 {
     for (size_t i = 0; i < container->var_count; i++)
@@ -430,69 +364,13 @@ static void md_set_to_var_table(trdp_md_container_t *container)
         if (byte_offset >= container->size_bytes)
             continue;
 
-        uint8_t *src = container->buffer + byte_offset;
         var_t var;
         var.type = mapping->type;
-
-        switch (mapping->type)
-        {
-            case TYPE_UINT8:
-                var.value.u8 = *src;
-                break;
-            case TYPE_INT8:
-                var.value.i8 = *(int8_t *)src;
-                break;
-            case TYPE_UINT16:
-            {
-                uint16_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.u16 = ntohs(val);
-                break;
-            }
-            case TYPE_INT16:
-            {
-                int16_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.i16 = (int16_t)ntohs((uint16_t)val);
-                break;
-            }
-            case TYPE_UINT32:
-            {
-                uint32_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.u32 = ntohl(val);
-                break;
-            }
-            case TYPE_INT32:
-            {
-                int32_t val;
-                memcpy(&val, src, sizeof(val));
-                var.value.i32 = (int32_t)ntohl((uint32_t)val);
-                break;
-            }
-            case TYPE_FLOAT32:
-            {
-                uint32_t tmp;
-                memcpy(&tmp, src, sizeof(tmp));
-                tmp = ntohl(tmp);
-                memcpy(&var.value.f32, &tmp, sizeof(var.value.f32));
-                break;
-            }
-            case TYPE_FLOAT64:
-            {
-                uint8_t swapped[8];
-                for (int j = 0; j < 8; j++)
-                    swapped[j] = src[7 - j];
-                memcpy(&var.value.f64, swapped, sizeof(var.value.f64));
-                break;
-            }
-        }
-
+        unmarshal_scalar_from_buffer(&var, container->buffer + byte_offset);
         var_table_set(mapping->var_id, &var);
     }
 }
 
-// Parse container from JSON and populate structure
 static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
 {
     cJSON *name      = cJSON_GetObjectItem(json, "name");
@@ -527,7 +405,6 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
     container->size_bits = size_bits && cJSON_IsNumber(size_bits) ? (uint32_t)size_bits->valuedouble : 0;
     container->size_bytes = (container->size_bits + 7) / 8;
 
-    // Allocate buffer
     container->buffer = calloc(1, container->size_bytes);
     if (!container->buffer)
     {
@@ -535,7 +412,6 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
         return -1;
     }
 
-    // Parse variables
     container->var_count = 0;
     container->variables = NULL;
     if (variables && cJSON_IsArray(variables))
@@ -581,8 +457,6 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
             const char *type_str = (var_type && cJSON_IsString(var_type)) ? var_type->valuestring : "uint8";
             uint32_t offset = (var_offset && cJSON_IsNumber(var_offset)) ? (uint32_t)var_offset->valuedouble : 0;
 
-            // Bitset types: one entry per bit (VARNAME.BITNAME) + one full var (VARNAME as uint8/16/32)
-            // Bits are added first so get_from_var_table assembles the buffer before the full var reads it back.
             int bitset_bytes = bitset_size_bytes(type_str);
             if (bitset_bytes > 0 && var_bits && cJSON_IsArray(var_bits))
             {
@@ -651,7 +525,6 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
     return 0;
 }
 
-// Parse containers from JSON array, skipping non-PD containers
 static int parse_containers(cJSON *json_array, trdp_container_t *containers, size_t *count, size_t max, dir_t dir)
 {
     *count = 0;
@@ -677,7 +550,6 @@ static int parse_containers(cJSON *json_array, trdp_container_t *containers, siz
     return 0;
 }
 
-// Map type string to trdp_msg_type_t
 static trdp_msg_type_t parse_msg_type_str(const char *s)
 {
     if (strcmp(s, "Mn") == 0) return TRDP_TYPE_Mn;
@@ -689,7 +561,6 @@ static trdp_msg_type_t parse_msg_type_str(const char *s)
     return TRDP_TYPE_PD;
 }
 
-// Parse a single MD container from JSON
 static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t dir, trdp_msg_type_t msg_type)
 {
     cJSON *name      = cJSON_GetObjectItem(json, "name");
@@ -717,7 +588,10 @@ static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t
     container->comid = comid && cJSON_IsNumber(comid) ? (uint32_t)comid->valuedouble : 0;
 
     if (dest_ip && cJSON_IsString(dest_ip))
+    {
         strncpy(container->dest_ip, dest_ip->valuestring, 15);
+        container->dest_ip_addr = parse_ip(dest_ip->valuestring);
+    }
 
     if (reply_to && cJSON_IsString(reply_to))
         strncpy(container->pair_name, reply_to->valuestring, TRDP_MAX_NAME_LEN - 1);
@@ -796,7 +670,6 @@ static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t
     return 0;
 }
 
-// Parse MD containers from JSON array (skip PD containers)
 static int parse_md_containers(cJSON *json_array, trdp_md_container_t *containers, size_t *count, size_t max, dir_t dir)
 {
     if (!json_array || !cJSON_IsArray(json_array))
@@ -825,7 +698,6 @@ static int parse_md_containers(cJSON *json_array, trdp_md_container_t *container
     return 0;
 }
 
-// Link Mp<->Mr partners after parsing
 static void link_md_partners(void)
 {
     // outputs.Mp → inputs.Mr (ammio is Caller: sends Mr, receives Mp)
@@ -869,7 +741,6 @@ static void link_md_partners(void)
     }
 }
 
-// MD message callback — called by TRDP library for received MD messages
 static void md_callback(
     void *pRefCon,
     TRDP_APP_SESSION_T appHandle,
@@ -991,7 +862,6 @@ static TRDP_ERR_T send_md_request(trdp_md_container_t *container, TRDP_IP_ADDR_T
         NULL);
 }
 
-// Main protocol loop
 static int thread_process_func(void *arg)
 {
     (void)arg;
@@ -1002,7 +872,6 @@ static int thread_process_func(void *arg)
 
     while (running)
     {
-        // Send PD: get values from var_table and publish to protocol bus
         for (size_t i = 0; i < input_count; i++)
         {
             trdp_container_t *container = &input_containers[i];
@@ -1018,7 +887,6 @@ static int thread_process_func(void *arg)
             }
         }
 
-        // Send MD: fire on rising edge of enable_id flag, then auto-reset
         for (size_t i = 0; i < md_input_count; i++)
         {
             trdp_md_container_t *container = &md_input_containers[i];
@@ -1039,11 +907,10 @@ static int thread_process_func(void *arg)
             }
 
             md_get_from_var_table(container);
-            TRDP_IP_ADDR_T dest = parse_ip(container->dest_ip);
 
             if (container->msg_type == TRDP_TYPE_Mn)
             {
-                err = send_md_notification(container, dest);
+                err = send_md_notification(container, container->dest_ip_addr);
                 if (err != TRDP_NO_ERR)
                     log_debug("trdp md: tlm_notify failed for '%s': %d", container->name, err);
                 else
@@ -1051,7 +918,7 @@ static int thread_process_func(void *arg)
             }
             else if (container->msg_type == TRDP_TYPE_Mr)
             {
-                err = send_md_request(container, dest);
+                err = send_md_request(container, container->dest_ip_addr);
                 if (err != TRDP_NO_ERR)
                     log_debug("trdp md: tlm_request failed for '%s': %d", container->name, err);
                 else if (container->partner)
@@ -1059,7 +926,6 @@ static int thread_process_func(void *arg)
             }
         }
 
-        // TRDP housekeeping
         FD_ZERO(&rfds);
         tv.tv_sec = 0;
         tv.tv_usec = 10000;  // 10ms
@@ -1071,7 +937,6 @@ static int thread_process_func(void *arg)
             log_debug("trdp: tlc_getInterval failed: %d", err);
         }
 
-        // Wait for network data or timeout
         (void)vos_select((VOS_SOCK_T)noOfDesc, &rfds, NULL, NULL, &tv);
 
         err = tlc_process(app_handle, &rfds, &noOfDesc);
@@ -1080,7 +945,6 @@ static int thread_process_func(void *arg)
             log_debug("trdp: tlc_process failed: %d", err);
         }
 
-        // Receive PD: get values from protocol bus and set into var_table
         for (size_t i = 0; i < output_count; i++)
         {
             trdp_container_t *container = &output_containers[i];
@@ -1109,9 +973,6 @@ static int thread_process_func(void *arg)
 
 static int trdp_init(cJSON *config)
 {
-    trdp_config = config;
-
-    // Parse local_ip
     cJSON *local_ip_json = cJSON_GetObjectItem(config, "local_ip");
     if (local_ip_json && cJSON_IsString(local_ip_json))
     {
@@ -1119,7 +980,6 @@ static int trdp_init(cJSON *config)
     }
     log_debug("trdp: local_ip = %s", local_ip);
 
-    // Parse source_port (optional — 0 means OS-assigned)
     cJSON *source_port_json = cJSON_GetObjectItem(config, "source_port");
     if (source_port_json && cJSON_IsNumber(source_port_json))
     {
@@ -1127,7 +987,6 @@ static int trdp_init(cJSON *config)
     }
     log_debug("trdp: source_port = %u", (unsigned)source_port);
 
-    // Parse containers
     cJSON *containers = cJSON_GetObjectItem(config, "containers");
     if (!containers)
     {
@@ -1135,7 +994,6 @@ static int trdp_init(cJSON *config)
         return 0;
     }
 
-    // Parse PD inputs (ammio publishes to SUT)
     cJSON *inputs = cJSON_GetObjectItem(containers, "inputs");
     if (inputs)
     {
@@ -1143,7 +1001,6 @@ static int trdp_init(cJSON *config)
         log_debug("trdp: parsed %zu PD input containers", input_count);
     }
 
-    // Parse PD outputs (ammio subscribes from SUT)
     cJSON *outputs = cJSON_GetObjectItem(containers, "outputs");
     if (outputs)
     {
@@ -1151,21 +1008,18 @@ static int trdp_init(cJSON *config)
         log_debug("trdp: parsed %zu PD output containers", output_count);
     }
 
-    // Parse MD input containers (ammio sends MD to SUT)
     if (inputs)
     {
         parse_md_containers(inputs, md_input_containers, &md_input_count, MAX_CONTAINERS, DIR_INPUT);
         log_debug("trdp: parsed %zu MD input containers", md_input_count);
     }
 
-    // Parse MD output containers (SUT sends MD to ammio)
     if (outputs)
     {
         parse_md_containers(outputs, md_output_containers, &md_output_count, MAX_CONTAINERS, DIR_OUTPUT);
         log_debug("trdp: parsed %zu MD output containers", md_output_count);
     }
 
-    // Link Mr<->Mp partners
     link_md_partners();
 
     return 0;
@@ -1199,19 +1053,20 @@ static void prebind_send_socket(TRDP_SOCKETS_T iface[],
         return;
     }
 
-    /* Close the socket TCNopen just created (bound to port 0) */
     vos_sockClose(iface[sock_idx].sock);
     iface[sock_idx].sock = VOS_INVALID_SOCKET;
 
-    /* Open a new socket with the same options */
     VOS_SOCK_OPT_T opts;
     memset(&opts, 0, sizeof(opts));
     opts.qos           = sendParam->qos;
     opts.ttl           = sendParam->ttl;
     opts.ttl_multicast = sendParam->ttl;
     opts.reuseAddrPort = (options & TRDP_OPTION_NO_REUSE_ADDR) ? FALSE : TRUE;
-    opts.nonBlocking   = (type == TRDP_SOCK_MD_UDP) ? TRUE
-                         : ((options & TRDP_OPTION_BLOCK) ? FALSE : TRUE);
+
+    if (type == TRDP_SOCK_MD_UDP)
+        opts.nonBlocking = TRUE;
+    else
+        opts.nonBlocking = (options & TRDP_OPTION_BLOCK) ? FALSE : TRUE;
 
     VOS_SOCK_T new_sock;
     if (vos_sockOpenUDP(&new_sock, &opts) != VOS_NO_ERR)
@@ -1232,7 +1087,6 @@ static void prebind_send_socket(TRDP_SOCKETS_T iface[],
         (void)vos_sockSetMulticastIf(new_sock, bind_addr);
     }
 
-    /* Install the pre-bound socket into the iface table slot TCNopen reserved */
     iface[sock_idx].sock = new_sock;
 
     log_debug("trdp: pre-bound %s send socket (slot %d) to port %u",
@@ -1243,7 +1097,6 @@ static int trdp_start(void)
 {
     TRDP_ERR_T err;
 
-    // Initialize TRDP library
     err = tlc_init(NULL, NULL, NULL);
     if (err != TRDP_NO_ERR)
     {
@@ -1251,7 +1104,6 @@ static int trdp_start(void)
         return -1;
     }
 
-    // Open session
     TRDP_IP_ADDR_T own_ip = parse_ip(local_ip);
     err = tlc_openSession(&app_handle, own_ip, 0, NULL, NULL, NULL, NULL);
     if (err != TRDP_NO_ERR)
@@ -1278,7 +1130,6 @@ static int trdp_start(void)
 #endif
     }
 
-    // Create publishers for PD input containers
     for (size_t i = 0; i < input_count; i++)
     {
         trdp_container_t *container = &input_containers[i];
@@ -1304,7 +1155,6 @@ static int trdp_start(void)
         }
     }
 
-    // Create subscribers for PD output containers
     for (size_t i = 0; i < output_count; i++)
     {
         trdp_container_t *container = &output_containers[i];
@@ -1330,7 +1180,6 @@ static int trdp_start(void)
         }
     }
 
-    // Register MD listeners for output containers that receive Mn or Mr from SUT
     for (size_t i = 0; i < md_output_count; i++)
     {
         trdp_md_container_t *container = &md_output_containers[i];
@@ -1365,7 +1214,6 @@ static int trdp_start(void)
         }
     }
 
-    // Start process thread
     running = true;
 
     if (thrd_create(&thread_process, thread_process_func, NULL) != thrd_success)
@@ -1386,14 +1234,11 @@ static void trdp_stop(void)
     if (!running)
         return;
 
-    // Signal threads to stop
     running = false;
 
-    // Wait for thread
     thrd_join(thread_process, NULL);
     log_debug("trdp: process thread stopped");
 
-    // Remove MD listeners for output containers
     for (size_t i = 0; i < md_output_count; i++)
     {
         if (md_output_containers[i].listen_handle)
@@ -1403,7 +1248,6 @@ static void trdp_stop(void)
         }
     }
 
-    // Unpublish all PD input containers
     for (size_t i = 0; i < input_count; i++)
     {
         if (input_containers[i].handle)
@@ -1416,8 +1260,8 @@ static void trdp_stop(void)
         free(input_containers[i].variables);
         input_containers[i].variables = NULL;
     }
+    input_count = 0;
 
-    // Unsubscribe all PD output containers
     for (size_t i = 0; i < output_count; i++)
     {
         if (output_containers[i].handle)
@@ -1430,8 +1274,8 @@ static void trdp_stop(void)
         free(output_containers[i].variables);
         output_containers[i].variables = NULL;
     }
+    output_count = 0;
 
-    // Free MD input containers
     for (size_t i = 0; i < md_input_count; i++)
     {
         free(md_input_containers[i].buffer);
@@ -1441,7 +1285,6 @@ static void trdp_stop(void)
     }
     md_input_count = 0;
 
-    // Free MD output containers
     for (size_t i = 0; i < md_output_count; i++)
     {
         free(md_output_containers[i].buffer);
@@ -1451,7 +1294,6 @@ static void trdp_stop(void)
     }
     md_output_count = 0;
 
-    // Close session and terminate
     if (app_handle)
     {
         tlc_closeSession(app_handle);
