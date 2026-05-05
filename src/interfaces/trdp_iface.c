@@ -9,12 +9,9 @@
 #include "../compat/net.h"
 
 #include "trdp_if_light.h"
-#include "trdp_private.h"
-#include "trdp_utils.h"
 #include "vos_mem.h"
 #include "vos_utils.h"
 #include "vos_thread.h"
-#include "vos_sock.h"
 #include "iec61375-2-3.h"
 
 #define MAX_CONTAINERS 64
@@ -47,7 +44,6 @@ typedef struct trdp_md_container_s {
 } trdp_md_container_t;
 
 static char local_ip[16] = "0.0.0.0";
-static UINT16 source_port = 0u;
 static TRDP_APP_SESSION_T app_handle = NULL;
 
 static trdp_container_t input_containers[MAX_CONTAINERS];
@@ -937,7 +933,7 @@ static int thread_process_func(void *arg)
             log_debug("trdp: tlc_getInterval failed: %d", err);
         }
 
-        (void)vos_select((VOS_SOCK_T)noOfDesc, &rfds, NULL, NULL, &tv);
+        noOfDesc = (INT32)vos_select((VOS_SOCK_T)noOfDesc, &rfds, NULL, NULL, &tv);
 
         err = tlc_process(app_handle, &rfds, &noOfDesc);
         if (err != TRDP_NO_ERR && err != TRDP_NODATA_ERR)
@@ -980,13 +976,6 @@ static int trdp_init(cJSON *config)
     }
     log_debug("trdp: local_ip = %s", local_ip);
 
-    cJSON *source_port_json = cJSON_GetObjectItem(config, "source_port");
-    if (source_port_json && cJSON_IsNumber(source_port_json))
-    {
-        source_port = (UINT16)source_port_json->valueint;
-    }
-    log_debug("trdp: source_port = %u", (unsigned)source_port);
-
     cJSON *containers = cJSON_GetObjectItem(config, "containers");
     if (!containers)
     {
@@ -1025,74 +1014,6 @@ static int trdp_init(cJSON *config)
     return 0;
 }
 
-/* Pre-bind a send socket to a fixed source port.
- * Must be called BEFORE any tlp_publish / tlm_addListener so that trdp_requestSocket
- * finds this socket and reuses it instead of creating a new one with port 0.
- *
- * Strategy: call trdp_requestSocket to let TCNopen create and register the socket
- * the normal way (so the iface table and high-water mark are updated correctly).
- * Then close the OS socket it created (which was bound to port 0) and replace it
- * with a new socket bound to src_port. On Windows, sockets can't be rebound, so
- * the replacement is necessary. */
-static void prebind_send_socket(TRDP_SOCKETS_T iface[],
-                                TRDP_SOCK_TYPE_T type,
-                                UINT16 trdp_port,
-                                const TRDP_SEND_PARAM_T *sendParam,
-                                TRDP_IP_ADDR_T bind_addr,
-                                TRDP_OPTION_T options,
-                                UINT16 src_port)
-{
-    INT32 sock_idx = TRDP_INVALID_SOCKET_INDEX;
-    TRDP_ERR_T err = trdp_requestSocket(iface, trdp_port, sendParam,
-                                        bind_addr, 0u, type, options,
-                                        FALSE, VOS_INVALID_SOCKET,
-                                        &sock_idx, 0u);
-    if (err != TRDP_NO_ERR || sock_idx == TRDP_INVALID_SOCKET_INDEX)
-    {
-        log_debug("trdp: prebind: trdp_requestSocket failed (%d)", (int)err);
-        return;
-    }
-
-    vos_sockClose(iface[sock_idx].sock);
-    iface[sock_idx].sock = VOS_INVALID_SOCKET;
-
-    VOS_SOCK_OPT_T opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.qos           = sendParam->qos;
-    opts.ttl           = sendParam->ttl;
-    opts.ttl_multicast = sendParam->ttl;
-    opts.reuseAddrPort = (options & TRDP_OPTION_NO_REUSE_ADDR) ? FALSE : TRUE;
-
-    if (type == TRDP_SOCK_MD_UDP)
-        opts.nonBlocking = TRUE;
-    else
-        opts.nonBlocking = (options & TRDP_OPTION_BLOCK) ? FALSE : TRUE;
-
-    VOS_SOCK_T new_sock;
-    if (vos_sockOpenUDP(&new_sock, &opts) != VOS_NO_ERR)
-    {
-        log_debug("trdp: prebind: vos_sockOpenUDP failed");
-        return;
-    }
-
-    if (vos_sockBind(new_sock, bind_addr, src_port) != VOS_NO_ERR)
-    {
-        log_debug("trdp: prebind: vos_sockBind to port %u failed", (unsigned)src_port);
-        vos_sockClose(new_sock);
-        return;
-    }
-
-    if (bind_addr != 0u)
-    {
-        (void)vos_sockSetMulticastIf(new_sock, bind_addr);
-    }
-
-    iface[sock_idx].sock = new_sock;
-
-    log_debug("trdp: pre-bound %s send socket (slot %d) to port %u",
-              (type == TRDP_SOCK_PD) ? "PD" : "MD", (int)sock_idx, (unsigned)src_port);
-}
-
 static int trdp_start(void)
 {
     TRDP_ERR_T err;
@@ -1113,22 +1034,6 @@ static int trdp_start(void)
         return -1;
     }
     log_debug("trdp: session opened");
-
-    // Pre-bind send sockets to a fixed source port before any pub/sub is created.
-    // trdp_requestSocket reuses a pre-existing socket when parameters match,
-    // so this guarantees the desired source port on all outgoing packets.
-    if (source_port != 0u)
-    {
-        TRDP_SESSION_PT s = (TRDP_SESSION_PT)app_handle;
-        prebind_send_socket(s->ifacePD, TRDP_SOCK_PD,
-                            s->pdDefault.port, &s->pdDefault.sendParam,
-                            own_ip, s->option, source_port);
-#if MD_SUPPORT
-        prebind_send_socket(s->ifaceMD, TRDP_SOCK_MD_UDP,
-                            s->mdDefault.udpPort, &s->mdDefault.sendParam,
-                            own_ip, s->option, source_port);
-#endif
-    }
 
     for (size_t i = 0; i < input_count; i++)
     {
