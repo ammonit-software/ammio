@@ -19,7 +19,7 @@ typedef struct
 
 typedef struct
 {
-    char name[TRDP_MAX_NAME_LEN];
+    char var_id[TRDP_MAX_NAME_LEN];
     char enable_id[TRDP_MAX_NAME_LEN];
     uint32_t comid;
     char multicast_ip[16];
