@@ -271,7 +271,7 @@ static int opcua_iface_start(void)
     cJSON *ep = cJSON_GetObjectItem(opcua_config, "endpoint");
     if (!ep || !cJSON_IsString(ep))
     {
-        log_debug("opcua: missing 'endpoint' in config");
+        log_error("opcua: missing 'endpoint' in config");
         return -1;
     }
     strncpy(endpoint, ep->valuestring, OPCUA_MAX_EP_LEN - 1);
@@ -279,7 +279,7 @@ static int opcua_iface_start(void)
     client = UA_Client_new();
     if (!client)
     {
-        log_debug("opcua: failed to create client");
+        log_error("opcua: failed to create client");
         return -1;
     }
     UA_ClientConfig_setDefault(UA_Client_getConfig(client));
@@ -304,7 +304,7 @@ static int opcua_iface_start(void)
     running = true;
     if (thrd_create(&thread_process, thread_process_func, NULL) != thrd_success)
     {
-        log_info("opcua: failed to create process thread");
+        log_error("opcua: failed to create process thread");
         running = false;
         UA_Client_disconnect(client);
         UA_Client_delete(client);

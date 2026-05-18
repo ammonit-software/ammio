@@ -95,6 +95,7 @@ int main(int argc, char *argv[])
 
     if (interfaces_init_with(interface_config) != 0)
     {
+        log_error("Interface initialization failed");
         cJSON_Delete(interface_config);
         return 1;
     }
@@ -111,6 +112,7 @@ int main(int argc, char *argv[])
 
     if (interfaces_start() != 0)
     {
+        log_error("Interface start failed");
         cJSON_Delete(interface_config);
         return 1;
     }

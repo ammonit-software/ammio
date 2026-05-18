@@ -35,14 +35,14 @@ int interfaces_init_with(cJSON *interface_config)
         cJSON *iface_type = cJSON_GetObjectItem(entry, "interface");
         if (!iface_type || !cJSON_IsString(iface_type))
         {
-            log_info("Entry '%s' missing 'interface' field, skipping", entry->string);
+            log_error("Entry '%s' missing 'interface' field, skipping", entry->string);
             continue;
         }
 
         cJSON *spec = cJSON_GetObjectItem(entry, "specification");
         if (!spec)
         {
-            log_info("Entry '%s' missing 'specification' field, skipping", entry->string);
+            log_error("Entry '%s' missing 'specification' field, skipping", entry->string);
             continue;
         }
 
@@ -59,7 +59,7 @@ int interfaces_init_with(cJSON *interface_config)
 
             if (interfaces[i]->init(spec) != 0)
             {
-                log_info("Failed to initialize '%s'", entry->string);
+                log_error("Failed to initialize '%s'", entry->string);
                 result = -1;
             }
             else
@@ -70,7 +70,7 @@ int interfaces_init_with(cJSON *interface_config)
         }
 
         if (!found)
-            log_info("No registered interface for type '%s' (entry '%s'), skipping", type_name, entry->string);
+            log_error("No registered interface for type '%s' (entry '%s'), skipping", type_name, entry->string);
     }
 
     return result;
@@ -88,6 +88,7 @@ int interfaces_start(void)
             log_info("Starting interface: %s", interfaces[i]->name);
             if (interfaces[i]->start() != 0)
             {
+                log_error("Failed to start interface: %s", interfaces[i]->name);
                 return -1;
             }
         }

@@ -286,7 +286,7 @@ static int modbus_iface_start(void)
 
         if (!device || !cJSON_IsString(device))
         {
-            log_debug("modbus rtu: missing device");
+            log_error("modbus rtu: missing 'device' in config");
             return -1;
         }
 
@@ -311,7 +311,7 @@ static int modbus_iface_start(void)
 
     if (!ctx)
     {
-        log_debug("modbus: failed to create context");
+        log_error("modbus: failed to create context");
         return -1;
     }
 
@@ -335,7 +335,7 @@ static int modbus_iface_start(void)
     running = true;
     if (thrd_create(&thread_process, thread_process_func, NULL) != thrd_success)
     {
-        log_info("modbus: failed to create process thread");
+        log_error("modbus: failed to create process thread");
         running = false;
         modbus_close(ctx);
         modbus_free(ctx);

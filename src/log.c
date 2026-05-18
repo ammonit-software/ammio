@@ -23,6 +23,14 @@ static void log_print(const char *level_str, const char *fmt, va_list args)
     printf("\n");
 }
 
+void log_error(const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    log_print("ERROR", fmt, args);
+    va_end(args);
+}
+
 void log_info(const char *fmt, ...)
 {
     va_list args;
