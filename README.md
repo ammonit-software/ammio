@@ -160,6 +160,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
             "containers": {
                 "inputs": [                         // containers ammio sends (SUT inputs)
                     {
+                        "name": "DOOR_STATUS",      // optional schema/display name only
                         "var_id": "DOOR_STATUS",    // container identifier, used in logging and var_table entry IDs
                         "enable_id": "DOOR_STATUS.is_enabled", // var_table key for the enable flag — must be unique
                         "type": "Pd",               // Pd: process data (periodic). Mn: MD notify. Mr: MD request. Mp: MD reply.
@@ -169,6 +170,7 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                         "size_bits": 32,            // total payload size in bits (Pd only)
                         "variables": [              // variable mappings packed inside this container
                             {
+                                "name": "door_is_open",  // optional schema/display name only
                                 "var_id": "door_is_open", // unique key in var_table and JSON API
                                 "offset": 0,        // bit offset within the container payload
                                 "type": "uint8"     // uint8 int8 uint16 int16 uint32 int32 float32 float64
@@ -176,13 +178,14 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
                         ]
                     },
                     {
+                        "name": "ttdb_notification", // optional schema/display name only
                         "var_id": "ttdb_notification", // MD Mn example — one-shot notify sent to SUT
                         "enable_id": "ttdb_notification.is_enabled", // write 1 to fire; auto-resets to 0 after send
                         "type": "Mn",
                         "comid": 101,
                         "dest_ip": "239.255.0.1",   // unicast or multicast destination
                         "variables": [
-                            { "var_id": "etbId", "offset": 0, "type": "uint8" }
+                            { "name": "etbId", "var_id": "etbId", "offset": 0, "type": "uint8" }
                         ]
                     }
                 ],
@@ -205,6 +208,8 @@ See `config/interface.x.example.json` files for ready-to-use starting points dep
     }
 }
 ```
+
+For TRDP, `var_id` is mandatory for containers and variables. `name` is optional metadata and is not used as a fallback identifier.
 
 For TRDP MD containers in `inputs`:
 

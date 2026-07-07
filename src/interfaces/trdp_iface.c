@@ -172,6 +172,15 @@ static TRDP_IP_ADDR_T parse_ip(const char *ip_str)
     return 0;
 }
 
+static cJSON *get_trdp_var_id(cJSON *json)
+{
+    cJSON *var_id = cJSON_GetObjectItem(json, "var_id");
+    if (var_id && cJSON_IsString(var_id))
+        return var_id;
+
+    return NULL;
+}
+
 // Float64 big-endian byte swap (TRDP wire format)
 static inline void swap64(const void *src, void *dst)
 {
@@ -524,7 +533,7 @@ static void md_deserialize_from_buffer(trdp_md_container_t *container, uint32_t 
 
 static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
 {
-    cJSON *var_id_c  = cJSON_GetObjectItem(json, "var_id");
+    cJSON *var_id_c  = get_trdp_var_id(json);
     cJSON *enable_id = cJSON_GetObjectItem(json, "enable_id");
     cJSON *comid     = cJSON_GetObjectItem(json, "comid");
     cJSON *multicast_ip = cJSON_GetObjectItem(json, "multicast_ip");
@@ -597,13 +606,16 @@ static int parse_container(cJSON *json, trdp_container_t *container, dir_t dir)
         cJSON *var;
         cJSON_ArrayForEach(var, variables)
         {
-            cJSON *var_id_json = cJSON_GetObjectItem(var, "var_id");
+            cJSON *var_id_json = get_trdp_var_id(var);
             cJSON *var_offset = cJSON_GetObjectItem(var, "offset");
             cJSON *var_type = cJSON_GetObjectItem(var, "type");
             cJSON *var_bits = cJSON_GetObjectItem(var, "bits");
 
             if (!var_id_json || !cJSON_IsString(var_id_json))
+            {
+                log_error("trdp: variable in container '%s' missing var_id", container->var_id);
                 continue;
+            }
 
             const char *type_str = (var_type && cJSON_IsString(var_type)) ? var_type->valuestring : "uint8";
             uint32_t offset = (var_offset && cJSON_IsNumber(var_offset)) ? (uint32_t)var_offset->valuedouble : 0;
@@ -727,7 +739,7 @@ static uint32_t calc_struct_entry_bits(md_struct_field_t *fields, size_t count)
 
 static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t dir, trdp_msg_type_t msg_type)
 {
-    cJSON *var_id_c  = cJSON_GetObjectItem(json, "var_id");
+    cJSON *var_id_c  = get_trdp_var_id(json);
     cJSON *enable_id = cJSON_GetObjectItem(json, "enable_id");
     cJSON *comid     = cJSON_GetObjectItem(json, "comid");
     cJSON *dest_ip   = cJSON_GetObjectItem(json, "dest_ip");
@@ -844,9 +856,12 @@ static int parse_md_container(cJSON *json, trdp_md_container_t *container, dir_t
                     continue;
                 }
 
-                cJSON *var_id_json = cJSON_GetObjectItem(var, "var_id");
+                cJSON *var_id_json = get_trdp_var_id(var);
                 if (!var_id_json || !cJSON_IsString(var_id_json))
+                {
+                    log_error("trdp md: variable in container '%s' missing var_id", container->var_id);
                     continue;
+                }
 
                 strncpy(f->var_id, var_id_json->valuestring, TRDP_MAX_NAME_LEN - 1);
 
