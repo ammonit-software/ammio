@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           # Surface the compiler errors as an annotation, readable without downloading the log
-          $lines = Select-String -Path build.log -Pattern ': (fatal )?error |: warning C4(013|047|133|244|700|703)' |
+          $lines = Select-String -Path build.log -Pattern ': (fatal )?error |ammio.src.*: warning C4' |
                    Select-Object -First 60 | ForEach-Object { $_.Line.Trim() }
           if ($lines) { Write-Output ("::error title=MSVC::" + ($lines -join '%0A')) }
 

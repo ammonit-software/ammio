@@ -103,15 +103,15 @@ typedef struct
 
 typedef enum
 {
-    MB_OK,
-    MB_DEVICE_ERROR,  // the slave answered with an exception: the link is fine
-    MB_LINK_ERROR     // timeout, broken connection, ...: reconnect
+    MBRES_OK,
+    MBRES_DEVICE_ERROR,  // the slave answered with an exception: the link is fine
+    MBRES_LINK_ERROR     // timeout, broken connection, ...: reconnect
 } mb_result_t;
 
 static mb_result_t classify_errno(int err)
 {
     // libmodbus reports protocol-level problems as MODBUS_ENOBASE + n
-    return (err > MODBUS_ENOBASE && err < MODBUS_ENOBASE + 100) ? MB_DEVICE_ERROR : MB_LINK_ERROR;
+    return (err > MODBUS_ENOBASE && err < MODBUS_ENOBASE + 100) ? MBRES_DEVICE_ERROR : MBRES_LINK_ERROR;
 }
 
 static bool is_bit_area(mb_area_t area)
@@ -475,7 +475,7 @@ static mb_result_t write_batch(mb_conn_t *mb, size_t first, size_t n)
     {
         int err = errno;
         mb_result_t res = classify_errno(err);
-        if (res == MB_DEVICE_ERROR)
+        if (res == MBRES_DEVICE_ERROR)
         {
             if (!mb->inputs[first].failing)
                 log_warn("%s: slave rejected write of '%s'%s (%s %u): %s", mb->name,
@@ -509,13 +509,13 @@ static mb_result_t write_batch(mb_conn_t *mb, size_t first, size_t n)
     }
     if (was_failing)
         var_table_set_quality_many(&mb->in_vars[first], n, AMMIO_QUALITY_GOOD);
-    return MB_OK;
+    return MBRES_OK;
 }
 
 static mb_result_t write_inputs(mb_conn_t *mb)
 {
     if (mb->n_inputs == 0)
-        return MB_OK;
+        return MBRES_OK;
 
     var_table_read_many(mb->in_vars, mb->n_inputs, mb->in_snaps);
 
@@ -546,11 +546,11 @@ static mb_result_t write_inputs(mb_conn_t *mb)
             n++;
         }
 
-        if (write_batch(mb, i, n) == MB_LINK_ERROR)
-            return MB_LINK_ERROR;
+        if (write_batch(mb, i, n) == MBRES_LINK_ERROR)
+            return MBRES_LINK_ERROR;
         i += n;
     }
-    return MB_OK;
+    return MBRES_OK;
 }
 
 static mb_result_t read_batch(mb_conn_t *mb, mb_batch_t *b)
@@ -571,7 +571,7 @@ static mb_result_t read_batch(mb_conn_t *mb, mb_batch_t *b)
     {
         int err = errno;
         mb_result_t res = classify_errno(err);
-        if (res == MB_DEVICE_ERROR)
+        if (res == MBRES_DEVICE_ERROR)
         {
             if (!b->failing)
                 log_warn("%s: slave rejected read of %s %u..%u: %s", mb->name, area_names[b->area],
@@ -608,17 +608,17 @@ static mb_result_t read_batch(mb_conn_t *mb, mb_batch_t *b)
         }
     }
     var_table_update_many(mb->out_vars, mb->out_vals, b->n, AMMIO_QUALITY_GOOD);
-    return MB_OK;
+    return MBRES_OK;
 }
 
 static mb_result_t read_outputs(mb_conn_t *mb)
 {
     for (size_t i = 0; i < mb->n_batches; i++)
     {
-        if (read_batch(mb, &mb->batches[i]) == MB_LINK_ERROR)
-            return MB_LINK_ERROR;
+        if (read_batch(mb, &mb->batches[i]) == MBRES_LINK_ERROR)
+            return MBRES_LINK_ERROR;
     }
-    return MB_OK;
+    return MBRES_OK;
 }
 
 static int mb_thread(void *arg)
@@ -631,7 +631,7 @@ static int mb_thread(void *arg)
     {
         if (mb->connected || mb_connect(mb))
         {
-            if (write_inputs(mb) == MB_LINK_ERROR || read_outputs(mb) == MB_LINK_ERROR)
+            if (write_inputs(mb) == MBRES_LINK_ERROR || read_outputs(mb) == MBRES_LINK_ERROR)
                 mb_disconnect(mb);
         }
         cycle_wait(&cycle, &mb->running);
