@@ -28,6 +28,8 @@ def local_ip():
 
 
 IP = local_ip()
+if IP is None and os.environ.get("AMMIO_TRDP_REQUIRED"):
+    raise RuntimeError("AMMIO_TRDP_REQUIRED is set but no non-loopback IPv4 address was found")
 pytestmark = pytest.mark.skipif(IP is None, reason="no non-loopback IPv4 address for TRDP")
 
 LAYOUT = [

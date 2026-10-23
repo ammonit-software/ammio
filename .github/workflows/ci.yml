@@ -30,7 +30,7 @@ jobs:
       - name: Integration tests
         run: |
           pip install -r tests/integration/requirements.txt
-          AMMIO_BIN=build/ammio pytest tests/integration -v
+          AMMIO_TRDP_REQUIRED=1 AMMIO_BIN=build/ammio pytest tests/integration -v
 
   sanitizers:
     runs-on: ubuntu-24.04
@@ -58,7 +58,7 @@ jobs:
         run: |
           ctest --test-dir build --output-on-failure
           pip install -r tests/integration/requirements.txt
-          AMMIO_BIN=build/ammio pytest tests/integration -v
+          AMMIO_TRDP_REQUIRED=1 AMMIO_BIN=build/ammio pytest tests/integration -v
 
   windows:
     runs-on: windows-2022
