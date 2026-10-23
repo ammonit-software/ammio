@@ -1,0 +1,29 @@
+{
+    "plc_1": {
+        "protocol": "modbus",
+        "settings": {
+            "mode": "tcp",
+            "host": "192.168.1.10",
+            "port": 502,
+            "slave_id": 1,
+            "period_ms": 100,
+            "timeout_ms": 500,
+            "byte_order": "ABCD",
+            "write_mode": "on_change",
+            "registers": {
+                "inputs": [
+                    { "var_id": "motor_speed_actual", "address": 0, "type": "uint16", "initial": 0 },
+                    { "var_id": "motor_current",      "address": 2, "type": "float32" },
+                    { "var_id": "fault_code",         "address": 4, "type": "uint16" },
+                    { "var_id": "emergency_stop",     "address": 0, "type": "bool", "area": "coil" }
+                ],
+                "outputs": [
+                    { "var_id": "motor_speed_setpoint", "address": 10, "type": "uint16" },
+                    { "var_id": "target_temperature",   "address": 12, "type": "float32", "byte_order": "CDAB" },
+                    { "var_id": "motor_enable",         "address": 0,  "type": "bool", "area": "discrete_input" },
+                    { "var_id": "uptime_s",             "address": 0,  "type": "uint32", "area": "input_register" }
+                ]
+            }
+        }
+    }
+}

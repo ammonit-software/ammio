@@ -16,11 +16,16 @@ jobs:
         shell: cmd
         run: scripts\build_windows-x64.bat --clean --config Release
 
+      - name: Unit tests
+        shell: cmd
+        run: build\Release\ammio_unit_tests.exe
+
       - name: Package
         shell: cmd
         run: |
           mkdir package
           copy build\Release\ammio.exe package\
+          copy config\*.example.json package\
           tar -acf ammio-windows-x64.zip -C package .
 
       - uses: actions/upload-artifact@v4
@@ -28,15 +33,41 @@ jobs:
           name: ammio-windows-x64
           path: ammio-windows-x64.zip
 
+  build-linux:
+    # Oldest supported runner, so the binary runs on older glibc versions too
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build
+        run: |
+          sudo apt-get install -y ninja-build
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: |
+          mkdir package
+          cp build/ammio config/*.example.json package/
+          tar -czf ammio-linux-x64.tar.gz -C package .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ammio-linux-x64
+          path: ammio-linux-x64.tar.gz
+
   release:
-    needs: build-windows
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ammio-windows-x64
+          merge-multiple: true
 
       - name: Create release
         env:
@@ -44,6 +75,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create ${{ github.ref_name }} \
-            ammio-windows-x64.zip \
+            ammio-windows-x64.zip ammio-linux-x64.tar.gz \
             --title "Release ${{ github.ref_name }}" \
             --generate-notes

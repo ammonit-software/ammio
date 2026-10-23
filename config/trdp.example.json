@@ -1,0 +1,50 @@
+{
+    "train_network": {
+        "protocol": "trdp",
+        "settings": {
+            "local_ip": "192.168.1.100",
+            "containers": {
+                "inputs": [
+                    {
+                        "id": "DOOR_STATUS",
+                        "type": "Pd",
+                        "comid": 2000,
+                        "dest_ip": "239.255.1.2",
+                        "period_ms": 100,
+                        "size_bits": 32,
+                        "variables": [
+                            { "var_id": "door_is_open",   "offset": 0,  "type": "uint8", "initial": 0 },
+                            { "var_id": "door_is_locked", "offset": 8,  "type": "uint8" },
+                            { "var_id": "door_flags",     "offset": 16, "type": "bitset8", "bits": ["fault", "obstacle"] }
+                        ]
+                    },
+                    {
+                        "id": "TTDB_NOTIFY",
+                        "type": "Mn",
+                        "comid": 101,
+                        "dest_ip": "239.255.0.1",
+                        "variables": [
+                            { "var_id": "etb_id", "type": "uint8" }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "id": "DOOR_CONTROL",
+                        "type": "Pd",
+                        "comid": 1000,
+                        "multicast_ip": "239.255.1.1",
+                        "period_ms": 100,
+                        "timeout_ms": 300,
+                        "size_bits": 32,
+                        "variables": [
+                            { "var_id": "door_open_cmd",  "offset": 0,  "type": "uint8" },
+                            { "var_id": "door_close_cmd", "offset": 8,  "type": "uint8" },
+                            { "var_id": "door_lock_cmd",  "offset": 16, "type": "uint8" }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+}

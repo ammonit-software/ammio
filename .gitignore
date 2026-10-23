@@ -36,3 +36,7 @@ CLAUDE.md
 
 # Internal notes
 .notes/
+
+# Python test caches
+__pycache__/
+.pytest_cache/
