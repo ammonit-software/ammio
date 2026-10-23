@@ -69,7 +69,20 @@ jobs:
 
       - name: Build
         shell: cmd
-        run: scripts\build_windows-x64.bat --clean --config Release
+        run: |
+          call scripts\build_windows-x64.bat --clean --config Release > build.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build.log
+          exit /b %RC%
+
+      - name: Report compiler errors
+        if: failure()
+        shell: pwsh
+        run: |
+          # Surface the compiler errors as an annotation, readable without downloading the log
+          $lines = Select-String -Path build.log -Pattern ': (fatal )?error |: warning C4(013|047|133|244|700|703)' |
+                   Select-Object -First 60 | ForEach-Object { $_.Line.Trim() }
+          if ($lines) { Write-Output ("::error title=MSVC::" + ($lines -join '%0A')) }
 
       - name: Unit tests
         shell: cmd

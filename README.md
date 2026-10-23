@@ -3,255 +3,407 @@
 </p>
 
 <p align="center">
-  <strong>Protocol agnostic test interface for critical-software systems. Talk to any System Under Test (SUT) in JSON, regardless of its protocol.</strong>
+  <strong>One JSON API for the signals of a System Under Test, whatever protocol it speaks: TRDP, Modbus or OPC UA.</strong>
 </p>
 
 # ammio
 
-**ammio** is a protocol agnostic test interface for critical-software systems. It sits between your test tooling and your SUT, speaking the SUT's native protocol on one side and exposing all its variables over a plain JSON API on the other. Talk to any software system in JSON, regardless of its protocol.
+**ammio** sits between your test tooling and a System Under Test (SUT). On one side it speaks the
+SUT's protocol; on the other it exposes every configured signal as a named variable over a small
+JSON API. Test scripts read and write `door_open_cmd` instead of dealing with TRDP telegrams,
+Modbus register maps or OPC UA node ids.
 
-It addresses three core pain points in critical systems testing:
+What this gives you:
 
-- *The protocol barrier*: SUTs speak TRDP, CAN, OPC UA, Modbus — each requiring specialist knowledge just to read a variable. **ammio** abstracts all of it into a single JSON API.
-- *The feedback loop speed*: Hardware-in-the-loop benches take days to set up. **ammio** lets scripts and automated tests interact with the SUT immediately, without a physical bench.
-- *The protocol migration problem*: When a SUT changes or adds a protocol, every tool and test script that talked to it breaks. With **ammio** in the middle, the JSON API stays the same — no refactoring, no disruption.
+- **No protocol barrier.** Scripts in any language can read and write SUT signals without a
+  protocol stack or specialist knowledge.
+- **Stable test scripts.** Variable names come from the configuration file. When the SUT moves
+  from Modbus to OPC UA, or a TRDP dataset changes, you update the configuration, not every script.
+- **Visible data quality.** Every value carries a quality (`good`, `stale`, `disconnected`, ...)
+  and a timestamp, so a test can tell "the SUT says 0" apart from "the SUT stopped talking".
+
+What ammio is **not**:
+
+- **Not a hardware-in-the-loop bench.** It replaces the protocol adapter, not the SUT, the I/O or
+  the timing environment. You still need the SUT running (on hardware or as a software build) and
+  reachable on the network.
+- **Not a qualified tool.** If you use ammio to produce verification evidence under a safety
+  standard (EN 50128, IEC 61508, ...), tool classification and qualification are your
+  responsibility. The automated tests in this repository are a starting point for that evidence,
+  not a substitute for it.
+- **Not hard real-time.** Cycles are scheduled without drift, but on a general-purpose OS with no
+  latency guarantees.
 
 ## Quickstart
 
 ### 1. Download
 
-#### Windows
-```cmd
-mkdir ammio
-cd ammio
-curl -L -o ammio-windows-x64.zip https://github.com/ammonit-software/ammio/releases/latest/download/ammio-windows-x64.zip
-tar -xf ammio-windows-x64.zip
-curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.example.json
+Get `ammio-windows-x64.zip` or `ammio-linux-x64.tar.gz` from the
+[latest release](https://github.com/ammonit-software/ammio/releases/latest). Each archive contains
+the `ammio` binary and the example configurations from [`config/`](config).
 
+### 2. Configure
+
+Start from the example for your protocol (`modbus.example.json`, `opcua.example.json` or
+`trdp.example.json`), adapt addresses and variables, and check it:
+
+```sh
+ammio --check --config my_sut.json
 ```
 
-Tinker the `interface.json` and adapt it for your needs. See [Configuration](#configuration) for more details.
+`--check` reports every problem with its location, e.g.
+`config: plc_1.settings.registers.inputs[2]: unknown key 'adress'`, and exits non-zero.
 
-### 2. Run
+### 3. Run
 
-#### Windows
-```cmd
-ammio.exe --endpoint tcp://127.0.0.1:5555 --interface interface.json
+```sh
+ammio --config my_sut.json --endpoint tcp://127.0.0.1:5555
 ```
 
-### 3. Interact
+### 4. Interact
 
-#### Using ammtest (recommended)
+**[ammtest](https://github.com/ammonit-software/ammtest)** is the recommended client: it adds test
+scripting, pytest integration and reporting on top of ammio. Any language with an
+[nng](https://nng.nanomsg.org/) binding works too. In Python with `pynng`:
 
-**[ammtest](https://github.com/ammonit-software/ammtest)** is the recommended client — it adds test scripting, pytest integration, and result reporting on top of ammio.
+```python
+import json, pynng
 
-#### Using a plain nng client
+with pynng.Req0(dial="tcp://127.0.0.1:5555") as sock:
+    def call(**req):
+        sock.send(json.dumps(req).encode())
+        return json.loads(sock.recv())
 
-Any language with an nng binding works.
-
-## Architecture
-
-**ammio** sits between an *ammio client* and the SUT — speaking the SUT's native protocol on one side, and exposing a simple JSON API on the other. This makes the SUT accessible to any tooling, agnostic from the underlying communication layer.
-
-All *ammio clients* communicate over [nng](https://nng.nanomsg.org/) REQ/REP. **[ammtest](https://github.com/ammonit-software/ammtest)**, also built by Ammonit Software, is the recommended client — it adds test scripting, automation, and reporting on top of ammio.
-
-In that way, anybody is able to interact with the SUT programmatically — tests can be scripted and automated, experiments launched, and custom integration built.
-
-There are two variable directions:
-
-- **Inputs** — the client writes a value, **ammio** publishes it to the SUT over the protocol bus
-- **Outputs** — the SUT publishes a value, **ammio** receives it and makes it available for the client to read
-
-All variables live in an internal store (**var_table**) that is continuously synchronized with the protocol bus. Any nng-compatible client can connect and interact with those variables at any time.
-
-```
-  test client (e.g. ammtest)
-         │
-         │  write(INPUT_VAR, value)      → ammio forwards to SUT via protocol bus
-         │  value = read(OUTPUT_VAR)     ← ammio receives from SUT via protocol bus
-         │
-         │ nng REQ/REP · JSON · TCP
-         │
-  ┌──────│───────────────────────────────────────────────────┐
-  │      │                                          ammio    │
-  │      ▼                                                   │
-  │  ┌────────────┐   ┌──────────────────┐   ┌───────────┐   │
-  │  │ var_server │◄──│    var_table     │◄──│Interfaces │   │
-  │  │            │   │ inputs / outputs │   │TRDP · CAN │   │
-  │  └────────────┘   └──────────────────┘   └─────┬─────┘   │
-  └─────────────────────────────────────────────── │ ────────┘
-                                                   │ protocol bus
-                                                   ▼
-                                          System Under Test (SUT)
+    call(cmd="write", var_id="motor_speed_actual", value=1200)
+    print(call(cmd="read", var_id="motor_speed_setpoint"))
+    # {"ok": true, "var_id": "motor_speed_setpoint", "value": 1150, "type": "uint16",
+    #  "dir": "output", "quality": "good", "timestamp_ns": 1761234567890123456}
 ```
 
-**var_server**: Client-facing endpoint (nng REQ/REP over TCP). Accepts JSON requests, enforces direction constraints (outputs are read-only for clients), and returns numeric error codes.
+## Concepts
 
-**var_table**: Central variable store. Holds every variable with its type, direction (`input`/`output`), current value, and timestamp. Continuously updated by the interface layer. Thread-safe — clients and interfaces access it concurrently without coordination.
+### Connections and variables
 
-**Interfaces**: Each interface (TRDP, CAN, ...) implements `init / start / stop` and runs a single `thread_process` loop — push inputs to the protocol bus, run protocol housekeeping, pull outputs back into var_table. One thread per interface keeps protocol libraries that are not thread-safe from conflicting.
+The configuration file is a JSON object. Each top-level key is a **connection**: a named link to
+the SUT using one protocol. A file can hold several connections, of different protocols or of the
+same one (two PLCs, two TRDP interfaces, ...). Each connection runs in its own thread.
+
+A connection declares **variables**. Each has a `var_id`, which is the name clients use. `var_id`s
+are exactly what you write in the configuration and must be unique across the whole file. ammio
+generates ids only where the configuration cannot name every variable:
+
+| Generated id | Where |
+|---|---|
+| `<connection>.connected` | every connection: `true` while the link to the SUT is up (read-only) |
+| `<container>.is_enabled` | TRDP containers, unless `enable_id` is given |
+| `<bitset>.<bit>` | TRDP bitset members (`<bitset>.bit<N>` for unnamed bits) |
+| `<array>[i].<field>` | entries of TRDP message-data arrays |
+| `<dataset>.<element>` | telegrams imported from a TRDP XML file |
+
+### Direction
+
+Directions are named from the **SUT's** point of view:
+
+| Direction | Data flow | Client access | Typical signals |
+|---|---|---|---|
+| `input` | ammio → SUT | read / write | sensor values, feedback and states the SUT consumes |
+| `output` | SUT → ammio | read only | commands, setpoints and states the SUT produces |
+
+### When values are sent to the SUT
+
+ammio never makes up data for the SUT:
+
+- An input is sent only once it **has a value**: written by a client, or given as `"initial"` in
+  the configuration. Until then the SUT's own value is left alone. Starting ammio does not write
+  zeros to a PLC.
+- Modbus and OPC UA inputs are written **when a client writes them** (`"write_mode": "on_change"`,
+  the default). Writing the same value again sends it again. With `"write_mode": "cyclic"` every
+  input with a value is written every period. After a reconnect, every input with a value is
+  sent once more.
+- A TRDP process-data telegram is published once any of its variables has a value, and only while
+  its `<container>.is_enabled` variable is `true`. Setting it to `false` really stops the telegram,
+  so the SUT sees a timeout.
+
+### Quality and timestamps
+
+Every variable carries a `quality`:
+
+| Quality | Meaning |
+|---|---|
+| `no_data` | no value yet (never received, never written) |
+| `good` | current value |
+| `stale` | last known value, but the SUT stopped sending it (TRDP timeout, missing MD reply, OPC UA "uncertain") |
+| `disconnected` | the connection to the SUT is down. Old values are kept but flagged. |
+| `bad` | the SUT rejected the request or sent a value that does not fit the variable's type |
+
+`timestamp_ns` is the wall-clock time (nanoseconds since the UNIX epoch) of the last update. It is
+sent as an exact JSON integer.
+
+### Types
+
+`bool`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, `float32`,
+`float64`. Writes are range-checked: `300` for a `uint8` or `1.5` for a `uint16` is rejected, never
+truncated. JSON `true`/`false` are accepted for any integer type. 64-bit integers above 2^53 can be
+read exactly but not written, because JSON numbers are doubles.
+
+## JSON API
+
+Clients use an nng **REQ** socket connected to `--endpoint`. Each request is one JSON object with a
+`cmd`. If the request has an `"id"`, the response echoes it. Every response contains `"ok"`.
+
+| Command | Request | Response |
+|---|---|---|
+| `read` | `{"cmd": "read", "var_id": "x"}` | `{"ok": true, "var_id": "x", "value": 1, "type": "uint8", "dir": "input", "quality": "good", "timestamp_ns": ...}` |
+| `read` (several) | `{"cmd": "read", "var_ids": ["x", "y"]}` | `{"ok": true, "vars": [{...}, {...}]}`: one consistent snapshot |
+| `write` | `{"cmd": "write", "var_id": "x", "value": 1}` | `{"ok": true}` |
+| `write` (several) | `{"cmd": "write", "values": {"x": 1, "y": 2.5}}` | `{"ok": true}`: all values or none, applied atomically |
+| `list_vars` | `{"cmd": "list_vars"}` | `{"ok": true, "vars": [{"var_id", "type", "dir", "access": "rw" \| "r", "connection"}]}` |
+| `list_connections` | `{"cmd": "list_connections"}` | `{"ok": true, "connections": [{"name", "protocol", "state"}]}` |
+| `info` | `{"cmd": "info"}` | `{"ok": true, "name": "ammio", "version", "protocols", "events"}` |
+
+Use batch writes for values that belong together, for example several fields of one TRDP
+telegram. They are applied under one lock and the driver snapshots a telegram's variables
+together, so the SUT never sees half of an update.
+
+Errors look like `{"ok": false, "error": {"code": "READ_ONLY", "message": "...", "var_id": "x"}}`:
+
+| Code | Meaning |
+|---|---|
+| `INVALID_JSON` | the request is not valid JSON |
+| `INVALID_REQUEST` | not an object, missing or malformed fields |
+| `UNKNOWN_CMD` | unknown `cmd` |
+| `NOT_FOUND` | unknown `var_id` |
+| `READ_ONLY` | the variable is an output of the SUT |
+| `INVALID_VALUE` | wrong JSON type, or a fraction for an integer variable |
+| `OUT_OF_RANGE` | the value does not fit the variable's type |
+| `INTERNAL` | out of memory |
+
+### Change events
+
+With `--events <url>` ammio also listens on an nng **PUB** socket and publishes one message per
+change of a value or quality:
+
+```json
+{"var_id":"door_open_cmd","value":1,"quality":"good","timestamp_ns":1761234567890123456}
+```
+
+Messages start with `{"var_id":"<id>"`, so a SUB socket can subscribe to one variable (or a prefix)
+by subscribing to that string. Events let a test catch a 20 ms pulse that polling would miss.
 
 ## Configuration
 
-### Command-line arguments
+### Command line
 
-| Argument | Required | Description |
+| Argument | Description |
+|---|---|
+| `--config <file>` | connections file (required) |
+| `--endpoint <url>` | nng endpoint of the JSON API, e.g. `tcp://127.0.0.1:5555` (required unless `--check`) |
+| `--events <url>` | optional nng PUB endpoint for change events |
+| `--log-level <level>` | `debug`, `info` (default), `warn`, `error` or `off` |
+| `--check` | validate the configuration and exit (0 = valid) |
+| `--version`, `--help` | |
+
+### File format
+
+```jsonc
+{
+    "<connection name>": {
+        "protocol": "modbus" | "opcua" | "trdp",
+        "settings": { ... }            // protocol specific, see below
+    }
+}
+```
+
+Validation is strict. Unknown keys, missing required keys, out-of-range numbers, duplicate
+`var_id`s and inconsistent layouts are errors, and all of them are reported in one run. JSON has no
+comments: use `"description"` or any key starting with `_` to annotate an object. Complete
+examples are in [`config/`](config).
+
+### Modbus (client / master)
+
+| Setting | Default | Description |
 |---|---|---|
-| `--endpoint <url>` | yes | nng endpoint where ammio listens for client connections (e.g. `tcp://127.0.0.1:5555`) |
-| `--interface <path>` | yes | path to the interface JSON file |
-| `--log-level <N>` | no | log verbosity: `0` = debug, `1` = info (default: info) |
+| `mode` | `"tcp"` | `"tcp"` or `"rtu"` |
+| `host`, `port` | –, `502` | TCP: slave address (required) and port |
+| `device`, `baud`, `parity`, `data_bits`, `stop_bits` | –, `9600`, `"N"`, `8`, `1` | RTU: serial device (required) and line settings |
+| `slave_id` | `1` | unit id, 0–255 |
+| `period_ms` | `100` | poll and write cycle |
+| `timeout_ms` | `500` | response timeout |
+| `byte_order` | `"ABCD"` | byte order of multi-register values: `ABCD` (big-endian), `CDAB` (word swap), `BADC` (byte swap), `DCBA` (little-endian) |
+| `write_mode` | `"on_change"` | `"on_change"` or `"cyclic"` (see above) |
+| `registers.inputs[]`, `registers.outputs[]` | | variables |
 
-### `interface.json`
+Each variable has `var_id`, `address` (0-based), `type` and optionally `area`, `byte_order`
+(overrides the connection's) and, for inputs, `initial`:
 
-Each entry is a user-defined connection name bound to a protocol and its specification. Multiple connections of different types can coexist in the same file.
+| `area` | Modbus table | Direction | Types |
+|---|---|---|---|
+| `holding` (default) | holding registers (FC 3 / 6 / 16) | input or output | all (8-bit types use the low byte; 32-bit: 2 registers, 64-bit: 4) |
+| `coil` | coils (FC 1 / 5 / 15) | input or output | `bool` |
+| `input_register` | input registers (FC 4) | output | all |
+| `discrete_input` | discrete inputs (FC 2) | output | `bool` |
 
-**Variable direction** defines the data flow between ammio and the SUT:
+Outputs are read in batches of contiguous addresses. If the slave rejects a request (Modbus
+exception), only the variables it covered become `bad`. Timeouts and broken connections mark the
+whole connection `disconnected`, and ammio reconnects.
 
-| Direction | Data flow | Typical variables |
+### OPC UA (client)
+
+| Setting | Default | Description |
 |---|---|---|
-| `input` | ammio → SUT | Sensor readings, external device states, status feedback that the SUT consumes |
-| `output` | SUT → ammio | Commands, setpoints, enable signals that the SUT produces |
+| `endpoint` | | `opc.tcp://host:port[/path]` (required) |
+| `username`, `password` | | optional, both or neither |
+| `period_ms` | `100` | sampling / publishing interval (subscription) or poll interval |
+| `timeout_ms` | `5000` | request timeout |
+| `read_mode` | `"subscription"` | `"subscription"` (monitored items) or `"poll"` (one batched Read per period) |
+| `write_mode` | `"on_change"` | `"on_change"` or `"cyclic"` |
+| `nodes.inputs[]`, `nodes.outputs[]` | | variables: `var_id`, `node_id`, `type`, and for inputs `initial` |
 
-See `config/interface.x.example.json` files for ready-to-use starting points depending on the protocol.
+`node_id` uses the standard string form: `ns=1;s=Motor.Speed`, `ns=2;i=1001`, `i=85`, `ns=1;g=<guid>`,
+`ns=1;b=<base64>`. Values are converted from whatever numeric type the server uses, with range
+checks. A value that does not fit becomes `bad` instead of being truncated. Writes use the OPC UA
+type matching the variable's `type`, which must match the node's data type. The OPC UA status code
+of each value becomes its quality. The connection uses security mode None.
 
-#### Modbus
+### TRDP
+
+| Setting | Default | Description |
+|---|---|---|
+| `local_ip` | `"0.0.0.0"` | address of the NIC to use. TRDP multicast does not work on loopback. |
+| `etb_topo_cnt_id`, `op_trn_topo_cnt_id` | | optional `var_id`s of `uint32` inputs that set the ETB / operational train topology counters |
+| `containers.inputs[]`, `containers.outputs[]` | | telegrams (below) |
+| `xml` | | import telegrams from a TRDP XML device configuration (below) |
+
+#### Process data (`"type": "Pd"`, the default)
+
+| Key | Inputs | Outputs | Description |
+|---|---|---|---|
+| `id` | required | required | container identifier (used in logs and `<id>.is_enabled`) |
+| `name` | optional | optional | display label |
+| `comid` | required | required | |
+| `dest_ip` | required | – | unicast or multicast destination |
+| `multicast_ip` | – | optional | multicast group to join |
+| `source_ip` | – | optional | only accept telegrams from this source |
+| `period_ms` | `100` | `100` | publish cycle; for outputs only used for the default timeout |
+| `timeout_ms` | – | `3 × period_ms` | after this the variables become `stale` (last value kept) |
+| `size_bits` | required | required | payload size, a multiple of 8 |
+| `enable_id`, `enabled` | `<id>.is_enabled`, `true` | same | the enable variable and its initial value. Inputs: `false` stops publishing. Outputs: `false` freezes the received values. |
+| `variables[]` | required | required | `var_id`, `offset` (bits, byte-aligned), `type`, and for inputs `initial` |
+
+Bitsets: `"type": "bitset8" | "bitset16" | "bitset32"` with `"bits": ["name0", "name1", ...]` gives
+one variable for the whole word plus one `bool` per named bit. Bit 0 is the most significant bit of
+the first byte. Clients can write either the word or single bits. Whichever was written last wins,
+and the other side follows.
+
+Offsets must be byte-aligned and every variable must fit within `size_bits` without overlapping
+another one. Data is encoded big-endian and packed (TRDP wire format).
+
+#### Message data (`"type": "Mn" | "Mr" | "Mp"`)
+
+| Type | In `inputs` (ammio sends) | In `outputs` (ammio receives) |
+|---|---|---|
+| `Mn` | notification to `dest_ip`, sent each time a client sets `<id>.is_enabled` to `true` (it resets itself) | notifications received on `comid` (optionally `multicast_ip`) |
+| `Mr` | request to `dest_ip`. The reply arrives in the `outputs` `Mp` whose `reply_to` names it. `reply_timeout_ms` (default 3000) marks that reply `stale` when it does not come. | requests from the SUT: their payload is stored, and ammio answers with the `inputs` `Mp` whose `reply_to` names it |
+| `Mp` | ammio's reply data for an `outputs` `Mr`. `enabled: false` stops answering, to test SUT timeouts. | reply data for an `inputs` `Mr` |
+
+Message variables are listed in wire order: scalars (`var_id`, `type`), padding
+(`{"type": "padding", "bits": 16}`), or arrays of structs declared in `structs`:
 
 ```jsonc
-{
-    "plc_connection": {                             // user-defined connection name
-        "interface": "modbus",
-        "specification": {
-            "mode": "tcp",                          // "tcp" for Ethernet, "rtu" for serial
-            "host": "192.168.1.10",                 // slave IP address (TCP only)
-            "port": 502,                            // slave port, default 502 (TCP only)
-            "slave_id": 1,                          // Modbus device address (1-247)
-            "period_ms": 100,                       // read/write cycle interval in ms
-            "registers": {
-                "inputs": [                         // holding registers ammio writes (SUT inputs)
-                    {
-                        "var_id": "motor_speed_actual",   // variable identifier in var_table and JSON API
-                        "address": 0,               // 0-based register address on the slave
-                        "type": "uint16"            // uint8 int8 uint16 int16 uint32 int32 float32 float64
-                    }
-                ],
-                "outputs": [                        // holding registers ammio reads (SUT outputs)
-                    {
-                        "var_id": "motor_speed_setpoint",
-                        "address": 10,
-                        "type": "uint16"
-                    }
-                ]
-            }
-        }
-    }
+"structs": { "Entry": [ {"var_id": "id", "type": "uint8"}, {"var_id": "level", "type": "int16"} ] },
+"variables": [
+    {"var_id": "entries", "type": "Entry", "iterations_id": "entry_count",
+     "iterations_type": "uint8", "max_iterations": 8}      // -> entry_count, entries[0].id, ...
+]
+```
+
+The element count (`iterations_id`) precedes the entries on the wire.
+
+#### Importing a TRDP XML device configuration
+
+```json
+"settings": {
+    "local_ip": "10.0.0.1",
+    "xml": { "file": "door_controller.xml", "interface": "eth0", "perspective": "sut" }
 }
 ```
 
-#### TRDP
+Process-data telegrams of the bus interface are imported with their datasets, including nested
+datasets and arrays. Variables are named `<dataset name>.<element>`, e.g.
+`DoorStatus.door[1].force`. TIMEDATE48/64 become `.seconds` plus `.ticks` / `.microseconds`. With
+`"perspective": "sut"` (the default) the XML describes the SUT: its `source` telegrams become
+outputs, its `sink` telegrams inputs. Use `"ammio"` if the XML describes the device ammio stands in
+for. Imported and hand-written containers can be combined. Message-data telegrams and
+variable-size arrays are not imported.
 
-```jsonc
-{
-    "train_network": {                              // user-defined connection name
-        "interface": "trdp",
-        "specification": {
-            "local_ip": "192.168.1.100",            // local NIC to bind to
-                                                    // use "0.0.0.0" for the default interface
-                                                    // loopback (127.0.0.1) is not supported
-            "containers": {
-                "inputs": [                         // containers ammio sends (SUT inputs)
-                    {
-                        "name": "DOOR_STATUS",      // optional schema/display name only
-                        "var_id": "DOOR_STATUS",    // container identifier, used in logging and var_table entry IDs
-                        "enable_id": "DOOR_STATUS.is_enabled", // var_table key for the enable flag — must be unique
-                        "type": "Pd",               // Pd: process data (periodic). Mn: MD notify. Mr: MD request. Mp: MD reply.
-                        "comid": 2000,              // TRDP communication ID, must match SUT dataset
-                        "multicast_ip": "239.255.1.2", // multicast group IP (Pd only)
-                        "period_ms": 100,           // publish interval in ms (Pd only)
-                        "size_bits": 32,            // total payload size in bits (Pd only)
-                        "variables": [              // variable mappings packed inside this container
-                            {
-                                "name": "door_is_open",  // optional schema/display name only
-                                "var_id": "door_is_open", // unique key in var_table and JSON API
-                                "offset": 0,        // bit offset within the container payload
-                                "type": "uint8"     // uint8 int8 uint16 int16 uint32 int32 float32 float64
-                            }
-                        ]
-                    },
-                    {
-                        "name": "ttdb_notification", // optional schema/display name only
-                        "var_id": "ttdb_notification", // MD Mn example — one-shot notify sent to SUT
-                        "enable_id": "ttdb_notification.is_enabled", // write 1 to fire; auto-resets to 0 after send
-                        "type": "Mn",
-                        "comid": 101,
-                        "dest_ip": "239.255.0.1",   // unicast or multicast destination
-                        "variables": [
-                            { "name": "etbId", "var_id": "etbId", "offset": 0, "type": "uint8" }
-                        ]
-                    }
-                ],
-                "outputs": [                        // containers ammio receives (SUT outputs)
-                    {
-                        "var_id": "DOOR_CONTROL",
-                        "enable_id": "DOOR_CONTROL.is_enabled",
-                        "type": "Pd",
-                        "comid": 1000,
-                        "multicast_ip": "239.255.1.1",
-                        "period_ms": 100,
-                        "size_bits": 32,
-                        "variables": [
-                            { "var_id": "door_open_cmd", "offset": 0, "type": "uint8" }
-                        ]
-                    }
-                ]
-            }
-        }
-    }
-}
+## Architecture
+
+```
+  test client (ammtest, scripts, ...)
+         │  nng REQ/REP, JSON          ▲ nng PUB/SUB, change events (optional)
+  ┌──────▼─────────────────────────────┴──────────────────────────────────┐
+  │  api/          api_server: requests        events: change publisher   │
+  │  ──────────────────────────────────────────────────────────────────── │
+  │  core/         var_table: values, quality, timestamps (thread-safe)   │
+  │                connections: one instance per configured connection    │
+  │  ──────────────────────────────────────────────────────────────────── │
+  │  drivers/      modbus        opcua         trdp (+ trdp_xml)          │
+  │                one thread per connection, own protocol context        │
+  └───────────────────┬────────────────┬────────────────┬─────────────────┘
+                 Modbus TCP/RTU      OPC UA            TRDP PD / MD
+                      ▼                ▼                ▼
+                          System Under Test (SUT)
 ```
 
-For TRDP, `var_id` is mandatory for containers and variables. `name` is optional metadata and is not used as a fallback identifier.
+- **api/**: `api_server` parses each request using its exact length (nng messages are not
+  NUL-terminated), checks direction, type and range, and answers. `events` publishes changes.
+- **core/**: `var_table` holds every variable. Writes and reads of several variables happen under
+  one lock. Variables are never removed while ammio runs, so drivers keep direct handles.
+  `connections` builds one driver instance per configuration entry and tracks its link state.
+- **drivers/**: each driver implements `create` (parse and validate, no network), `start`,
+  `stop` and `destroy`. Protocol libraries that are not thread-safe are only used from their
+  connection's thread.
 
-For TRDP MD containers in `inputs`:
+## Building from source
 
-- `Mn`: raising `enable_id` sends one notification.
-- `Mr`: raising `enable_id` sends one request and waits for the paired `Mp`.
-- `Mp`: if the paired `Mr` arrives from the SUT, ammio replies automatically via `reply_to`.
-- Proactive `Mn` and `Mr` sends require `dest_ip` to point to the SUT or multicast destination. If `dest_ip` is missing, ammio skips the send.
-
-#### OPC UA
-
-```jsonc
-{
-    "scada_server": {                               // user-defined connection name
-        "interface": "opcua",
-        "specification": {
-            "endpoint": "opc.tcp://192.168.1.20:4840", // OPC UA server URL
-            "username": "operator",                 // optional, for authenticated servers
-            "password": "password",                 // optional
-            "period_ms": 100,                       // read/write cycle interval in ms
-            "nodes": {
-                "inputs": [                         // nodes ammio writes to (SUT inputs)
-                    {
-                        "var_id": "motor_speed_actual",   // variable identifier in var_table and JSON API
-                        "node_id": "ns=1;s=Motor.SpeedActual", // OPC UA node identifier
-                                                    // ns=<namespace>;s=<string name>
-                                                    // ns=<namespace>;i=<numeric id>
-                                                    // browse node IDs with UAExpert or similar tool
-                        "type": "float32"           // uint8 int8 uint16 int16 uint32 int32 float32 float64
-                    }
-                ],
-                "outputs": [                        // nodes ammio reads from (SUT outputs)
-                    {
-                        "var_id": "motor_speed_setpoint",
-                        "node_id": "ns=1;s=Motor.SpeedSetpoint",
-                        "type": "float32"
-                    }
-                ]
-            }
-        }
-    }
-}
+```sh
+git clone --recursive https://github.com/ammonit-software/ammio
+cmake -S ammio -B ammio/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ammio/build
 ```
+
+On Windows, `scripts\build_windows-x64.bat --config Release` builds with Visual Studio 2022.
+All dependencies are vendored as submodules: cJSON, uthash, nng, TCNopen, libmodbus, open62541.
+
+### Tests
+
+```sh
+ctest --test-dir build --output-on-failure                 # C unit tests
+pip install -r tests/integration/requirements.txt
+AMMIO_BIN=build/ammio pytest tests/integration             # against simulated devices
+```
+
+The integration tests run the real binary against a pymodbus slave, an asyncua server and a second
+ammio instance over TRDP. The TRDP tests need a non-loopback IPv4 address (`AMMIO_TRDP_IP`
+overrides it). CI runs everything on Linux, also under AddressSanitizer and
+UndefinedBehaviorSanitizer, and on Windows.
+
+## Upgrading from 0.5
+
+| 0.5 | 0.6 |
+|---|---|
+| `--interface <file>` | `--config <file>` (old flag still accepted, with a warning) |
+| `"interface": "modbus"`, `"specification": {...}` | `"protocol": "modbus"`, `"settings": {...}` (old keys still accepted, with a warning) |
+| TRDP container `var_id` | `id` (old key still accepted, with a warning) |
+| TRDP `enable_id` required | optional, defaults to `<id>.is_enabled`; enable variables are `bool` |
+| TRDP PD inputs `multicast_ip` | `dest_ip` (`multicast_ip` still accepted for inputs) |
+| TRDP MD variables named `<container>.<var_id>` | named exactly `<var_id>`. Array entries are `<array>[i].<field>`. |
+| Modbus `float32` used word order CDAB, integers ABCD | everything uses `byte_order` (default `ABCD`). Set `"byte_order": "CDAB"` on `float32` variables to keep the old behaviour. |
+| missing `type` / `address` defaulted to `uint16` / `0` | required |
+| inputs written as `0` from startup | written only once they have a value |
+| responses `{"error": 1}` / `{"status": "ok"}`, numeric `type` in `read` | `{"ok": ..., "error": {"code", "message"}}`, `type` as a string |
+| `list_errors` | removed (error codes are self-describing strings) |
+| values never received read as `0` | `null` with quality `no_data` |
 
 ## Related Projects
 
