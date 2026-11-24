@@ -46,12 +46,12 @@ extern const protocol_t modbus_protocol;
 extern const protocol_t opcua_protocol;
 extern const protocol_t trdp_protocol;
 
-// Registers a variable; logs and returns NULL if the name is already taken.
-var_t *conn_add_var(const char *ctx, const char *name, type_t type, dir_t dir);
+// Registers a variable; logs and returns NULL if the var_id is already taken.
+var_t *conn_add_var(const char *ctx, const char *id, type_t type, dir_t dir);
 
 // Per-variable problem reporting without log spam: logs once when a problem
 // appears and once when it clears (problem == NULL).
 // `state` is the adapter's per-variable bool.
-void conn_report(const char *conn, const char *var, bool *state, const char *problem);
+void conn_report(const char *conn, const char *what, bool *state, const char *problem);
 
 #endif

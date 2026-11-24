@@ -48,7 +48,7 @@ const char *type_name(type_t type)
 
 const char *type_names(void)
 {
-    return "bool, uint8, int8, uint16, int16, uint32, int32, float32, float64";
+    return "uint8, int8, uint16, int16, uint32, int32, float32, float64, bool";
 }
 
 size_t type_size(type_t type)
@@ -193,7 +193,7 @@ value_t value_from_be(type_t type, const uint8_t *src)
 
 struct var
 {
-    char *name;
+    char *id;
     type_t type;
     dir_t dir;
     value_t value;          // guarded by values_mutex
@@ -201,7 +201,7 @@ struct var
     UT_hash_handle hh;
 };
 
-static var_t *by_name = NULL;   // uthash index
+static var_t *by_id = NULL;     // uthash index
 static var_t **ordered = NULL;  // registration order
 static size_t count = 0, capacity = 0;
 
@@ -213,11 +213,11 @@ static void values_init(void)
     mtx_init(&values_mutex, mtx_plain);
 }
 
-var_t *vars_add(const char *name, type_t type, dir_t dir)
+var_t *vars_add(const char *id, type_t type, dir_t dir)
 {
     call_once(&values_once, values_init);
 
-    if (vars_find(name))
+    if (vars_find(id))
         return NULL;
 
     if (count == capacity)
@@ -231,26 +231,26 @@ var_t *vars_add(const char *name, type_t type, dir_t dir)
     }
 
     var_t *var = calloc(1, sizeof(*var));
-    char *name_copy = var ? malloc(strlen(name) + 1) : NULL;
-    if (!name_copy)
+    char *id_copy = var ? malloc(strlen(id) + 1) : NULL;
+    if (!id_copy)
     {
         free(var);
         return NULL;
     }
-    strcpy(name_copy, name);
-    var->name = name_copy;
+    strcpy(id_copy, id);
+    var->id = id_copy;
     var->type = type;
     var->dir = dir;
 
-    HASH_ADD_KEYPTR(hh, by_name, var->name, strlen(var->name), var);
+    HASH_ADD_KEYPTR(hh, by_id, var->id, strlen(var->id), var);
     ordered[count++] = var;
     return var;
 }
 
-var_t *vars_find(const char *name)
+var_t *vars_find(const char *id)
 {
     var_t *var = NULL;
-    HASH_FIND_STR(by_name, name, var);
+    HASH_FIND_STR(by_id, id, var);
     return var;
 }
 
@@ -266,10 +266,10 @@ var_t *vars_at(size_t index)
 
 void vars_clear(void)
 {
-    HASH_CLEAR(hh, by_name);
+    HASH_CLEAR(hh, by_id);
     for (size_t i = 0; i < count; i++)
     {
-        free(ordered[i]->name);
+        free(ordered[i]->id);
         free(ordered[i]);
     }
     free(ordered);
@@ -277,7 +277,7 @@ void vars_clear(void)
     count = capacity = 0;
 }
 
-const char *var_name(const var_t *var) { return var->name; }
+const char *var_id(const var_t *var) { return var->id; }
 type_t var_type(const var_t *var) { return var->type; }
 dir_t var_dir(const var_t *var) { return var->dir; }
 

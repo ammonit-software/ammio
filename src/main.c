@@ -30,11 +30,13 @@ static void usage(FILE *out)
     fprintf(out,
             "usage: ammio [options] <config.json>\n"
             "\n"
-            "  -e, --endpoint <url>  where clients connect (default: " DEFAULT_ENDPOINT ")\n"
-            "  -c, --check           validate the config and exit\n"
-            "  -v, --verbose         log debug details\n"
-            "  -h, --help            show this help\n"
-            "      --version         show the version\n");
+            "  -i, --interface <file>  the config file (same as the positional argument)\n"
+            "  -e, --endpoint <url>    where clients connect (default: " DEFAULT_ENDPOINT ")\n"
+            "  -c, --check             validate the config and exit\n"
+            "  -v, --verbose           log debug details (same as --log-level 0)\n"
+            "      --log-level <n>     0 = debug, 1 = info (default), 2 = errors only\n"
+            "  -h, --help              show this help\n"
+            "      --version           show the version\n");
 }
 
 int main(int argc, char *argv[])
@@ -56,12 +58,31 @@ int main(int argc, char *argv[])
             printf("ammio %s\n", AMMIO_VERSION);
             return 0;
         }
+        bool has_value = i + 1 < argc;
         if (strcmp(arg, "-v") == 0 || strcmp(arg, "--verbose") == 0)
             log_set_level(LOG_DEBUG);
         else if (strcmp(arg, "-c") == 0 || strcmp(arg, "--check") == 0)
             check_only = true;
-        else if ((strcmp(arg, "-e") == 0 || strcmp(arg, "--endpoint") == 0) && i + 1 < argc)
+        else if ((strcmp(arg, "-e") == 0 || strcmp(arg, "--endpoint") == 0) && has_value)
             endpoint = argv[++i];
+        else if ((strcmp(arg, "-i") == 0 || strcmp(arg, "--interface") == 0) && has_value && !config_path)
+            config_path = argv[++i];
+        else if (strcmp(arg, "--log-level") == 0 && has_value)
+        {
+            // v0.5 numbering
+            const char *n = argv[++i];
+            if (strcmp(n, "0") == 0)
+                log_set_level(LOG_DEBUG);
+            else if (strcmp(n, "1") == 0)
+                log_set_level(LOG_INFO);
+            else if (strcmp(n, "2") == 0)
+                log_set_level(LOG_ERROR);
+            else
+            {
+                fprintf(stderr, "ammio: --log-level must be 0, 1 or 2\n");
+                return 2;
+            }
+        }
         else if (arg[0] != '-' && !config_path)
             config_path = arg;
         else

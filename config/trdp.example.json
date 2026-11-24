@@ -4,31 +4,44 @@
         "local_ip": "192.168.1.100",
         "inputs": [
             {
-                "name": "DOOR_STATUS",
+                "var_id": "DOOR_STATUS",
+                "enable_id": "DOOR_STATUS.is_enabled",
                 "comid": 2000,
                 "dest_ip": "239.255.1.2",
                 "period_ms": 100,
                 "size": 4,
                 "variables": [
-                    { "name": "door_is_open",   "offset": 0, "type": "uint8" },
-                    { "name": "door_is_locked", "offset": 1, "type": "uint8" },
-                    { "name": "door_fault",     "offset": 2, "type": "uint8" },
-                    { "name": "door_alarm",     "offset": 3, "type": "bitset8",
+                    { "var_id": "door_is_open",   "offset": 0, "type": "uint8" },
+                    { "var_id": "door_is_locked", "offset": 1, "type": "uint8" },
+                    { "var_id": "door_fault",     "offset": 2, "type": "uint8" },
+                    { "var_id": "door_alarm",     "offset": 3, "type": "bitset8",
                       "bits": ["obstacle", "emergency_release"] }
+                ]
+            },
+            {
+                "type": "Mn",
+                "var_id": "ttdb_notification",
+                "enable_id": "ttdb_notification.send",
+                "comid": 101,
+                "dest_ip": "239.255.0.1",
+                "variables": [
+                    { "var_id": "etb_id", "type": "uint8" },
+                    { "type": "padding", "bits": 24 },
+                    { "var_id": "topo_count", "type": "uint32" }
                 ]
             }
         ],
         "outputs": [
             {
-                "name": "DOOR_CONTROL",
+                "var_id": "DOOR_CONTROL",
                 "comid": 1000,
                 "dest_ip": "239.255.1.1",
                 "period_ms": 100,
                 "size": 4,
                 "variables": [
-                    { "name": "door_open_cmd",  "offset": 0, "type": "uint8" },
-                    { "name": "door_close_cmd", "offset": 1, "type": "uint8" },
-                    { "name": "door_lock_cmd",  "offset": 2, "type": "uint8" }
+                    { "var_id": "door_open_cmd",  "offset": 0, "type": "uint8" },
+                    { "var_id": "door_close_cmd", "offset": 1, "type": "uint8" },
+                    { "var_id": "door_lock_cmd",  "offset": 2, "type": "uint8" }
                 ]
             }
         ]

@@ -37,20 +37,25 @@ static char *error(api_error_t code, const char *fmt, ...)
     return reply(obj);
 }
 
-static void add_info(cJSON *obj, const var_t *var)
-{
-    cJSON_AddStringToObject(obj, "name", var_name(var));
-    cJSON_AddStringToObject(obj, "type", type_name(var_type(var)));
-    cJSON_AddStringToObject(obj, "dir", dir_name(var_dir(var)));
-}
+static const char *const error_names[ERR_COUNT] = {
+    [ERR_NOT_FOUND] = "variable not found",
+    [ERR_READ_ONLY] = "read-only variable",
+    [ERR_INVALID_JSON] = "invalid json",
+    [ERR_INVALID_CMD] = "invalid command",
+    [ERR_MISSING_VALUE] = "missing value",
+    [ERR_INVALID_VALUE] = "invalid value",
+};
 
 static char *handle_read(const var_t *var)
 {
     uint64_t ts = 0;
     value_t value = var_get(var, &ts);
 
+    // "type" is the numeric type code here, as in ammio v0.5 (list_vars gives names).
     cJSON *obj = cJSON_CreateObject();
-    add_info(obj, var);
+    cJSON_AddStringToObject(obj, "var_id", var_id(var));
+    cJSON_AddNumberToObject(obj, "type", var_type(var));
+    cJSON_AddStringToObject(obj, "dir", dir_name(var_dir(var)));
     if (var_type(var) == TYPE_BOOL)
         cJSON_AddBoolToObject(obj, "value", value.b);
     else
@@ -62,7 +67,7 @@ static char *handle_read(const var_t *var)
 static char *handle_write(var_t *var, const cJSON *json_value)
 {
     if (var_dir(var) == DIR_OUTPUT)
-        return error(ERR_READ_ONLY, "'%s' is an output and cannot be written", var_name(var));
+        return error(ERR_READ_ONLY, "'%s' is an output and cannot be written", var_id(var));
     if (!json_value)
         return error(ERR_MISSING_VALUE, "missing 'value'");
 
@@ -77,10 +82,10 @@ static char *handle_write(var_t *var, const cJSON *json_value)
     value_t value;
     if (!value_from_double(var_type(var), d, &value))
         return error(ERR_INVALID_VALUE, "%.17g does not fit '%s' (%s)",
-                     d, var_name(var), type_name(var_type(var)));
+                     d, var_id(var), type_name(var_type(var)));
 
     var_set(var, value);
-    log_debug("api: %s = %.17g", var_name(var), d);
+    log_debug("api: %s = %.17g", var_id(var), d);
 
     cJSON *obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "status", "ok");
@@ -93,9 +98,26 @@ static char *handle_list(void)
     cJSON *arr = cJSON_AddArrayToObject(obj, "vars");
     for (size_t i = 0; i < vars_count(); i++)
     {
+        const var_t *var = vars_at(i);
         cJSON *item = cJSON_CreateObject();
-        add_info(item, vars_at(i));
+        cJSON_AddStringToObject(item, "var_id", var_id(var));
+        cJSON_AddStringToObject(item, "type", type_name(var_type(var)));
+        cJSON_AddStringToObject(item, "dir", dir_name(var_dir(var)));
         cJSON_AddItemToArray(arr, item);
+    }
+    return reply(obj);
+}
+
+static char *handle_list_errors(void)
+{
+    cJSON *obj = cJSON_CreateObject();
+    cJSON *errors = cJSON_AddObjectToObject(obj, "errors");
+    cJSON_AddStringToObject(errors, "0", "ok");
+    for (int code = 1; code < ERR_COUNT; code++)
+    {
+        char key[8];
+        snprintf(key, sizeof(key), "%d", code);
+        cJSON_AddStringToObject(errors, key, error_names[code]);
     }
     return reply(obj);
 }
@@ -104,23 +126,26 @@ static char *dispatch(const cJSON *req)
 {
     const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(req, "cmd");
     if (!cJSON_IsString(cmd))
-        return error(ERR_INVALID_CMD, "missing 'cmd' (read, write, list_vars)");
+        return error(ERR_INVALID_CMD, "missing 'cmd' (read, write, list_vars, list_errors)");
 
     if (strcmp(cmd->valuestring, "list_vars") == 0)
         return handle_list();
+    if (strcmp(cmd->valuestring, "list_errors") == 0)
+        return handle_list_errors();
 
     bool is_read = strcmp(cmd->valuestring, "read") == 0;
     bool is_write = strcmp(cmd->valuestring, "write") == 0;
     if (!is_read && !is_write)
-        return error(ERR_INVALID_CMD, "unknown cmd '%s' (read, write, list_vars)", cmd->valuestring);
+        return error(ERR_INVALID_CMD, "unknown cmd '%s' (read, write, list_vars, list_errors)",
+                     cmd->valuestring);
 
-    const cJSON *name = cJSON_GetObjectItemCaseSensitive(req, "name");
-    if (!cJSON_IsString(name))
-        return error(ERR_INVALID_CMD, "missing 'name'");
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "var_id");
+    if (!cJSON_IsString(id))
+        return error(ERR_INVALID_CMD, "missing 'var_id'");
 
-    var_t *var = vars_find(name->valuestring);
+    var_t *var = vars_find(id->valuestring);
     if (!var)
-        return error(ERR_NOT_FOUND, "unknown variable '%s'", name->valuestring);
+        return error(ERR_NOT_FOUND, "unknown variable '%s'", id->valuestring);
 
     return is_read ? handle_read(var)
                    : handle_write(var, cJSON_GetObjectItemCaseSensitive(req, "value"));

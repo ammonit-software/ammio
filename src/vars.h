@@ -11,17 +11,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// The numeric values are part of the client API ("type" in read replies)
+// and match ammio v0.5: only append new types.
 typedef enum
 {
-    TYPE_BOOL,
-    TYPE_UINT8,
-    TYPE_INT8,
-    TYPE_UINT16,
-    TYPE_INT16,
-    TYPE_UINT32,
-    TYPE_INT32,
-    TYPE_FLOAT32,
-    TYPE_FLOAT64,
+    TYPE_UINT8,   // 0
+    TYPE_INT8,    // 1
+    TYPE_UINT16,  // 2
+    TYPE_INT16,   // 3
+    TYPE_UINT32,  // 4
+    TYPE_INT32,   // 5
+    TYPE_FLOAT32, // 6
+    TYPE_FLOAT64, // 7
+    TYPE_BOOL,    // 8
     TYPE_COUNT
 } type_t;
 
@@ -66,14 +68,14 @@ value_t value_from_be(type_t type, const uint8_t *src);
 
 typedef struct var var_t;
 
-// Returns NULL if a variable with this name already exists.
-var_t *vars_add(const char *name, type_t type, dir_t dir);
-var_t *vars_find(const char *name);
+// Returns NULL if a variable with this var_id already exists.
+var_t *vars_add(const char *var_id, type_t type, dir_t dir);
+var_t *vars_find(const char *var_id);
 size_t vars_count(void);
 var_t *vars_at(size_t index); // in registration order
 void vars_clear(void);
 
-const char *var_name(const var_t *var);
+const char *var_id(const var_t *var);
 type_t var_type(const var_t *var);
 dir_t var_dir(const var_t *var);
 

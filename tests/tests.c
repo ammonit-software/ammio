@@ -116,14 +116,14 @@ static int api_error(const char *request)
 static bool api_write(const char *name, double value)
 {
     char req[256];
-    snprintf(req, sizeof(req), "{\"cmd\":\"write\",\"name\":\"%s\",\"value\":%.17g}", name, value);
+    snprintf(req, sizeof(req), "{\"cmd\":\"write\",\"var_id\":\"%s\",\"value\":%.17g}", name, value);
     return api_error(req) == 0;
 }
 
 static double api_read(const char *name, uint64_t *timestamp)
 {
     char req[256];
-    snprintf(req, sizeof(req), "{\"cmd\":\"read\",\"name\":\"%s\"}", name);
+    snprintf(req, sizeof(req), "{\"cmd\":\"read\",\"var_id\":\"%s\"}", name);
     cJSON *r = api(req);
     const cJSON *v = cJSON_GetObjectItem(r, "value");
     double d = cJSON_IsBool(v) ? (cJSON_IsTrue(v) ? 1 : 0) : cJSON_IsNumber(v) ? v->valuedouble : NAN;
@@ -203,52 +203,73 @@ static void test_config(void)
         "{\"a\":{\"protocol\":\"can\"}}",
         "{\"a\":{\"host\":\"x\"}}",
         // modbus
-        "{\"a\":{\"protocol\":\"modbus\",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"device\":\"/dev/ttyS0\",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{\"protocol\":\"modbus\",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"device\":\"/dev/ttyS0\",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
         "{\"a\":{" MB "}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"adress\":0,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"unit16\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":65536,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":65534,\"type\":\"float64\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint32\"},"
-        "{\"name\":\"y\",\"address\":1,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"},"
-        "{\"name\":\"x\",\"address\":1,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"word_order\":\"middle\",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"baud\":9600,\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"period_ms\":0,\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":-1,\"type\":\"uint16\"}]}}",
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0.5,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"adress\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"unit16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":65536,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":65534,\"type\":\"float64\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint32\"},"
+        "{\"var_id\":\"y\",\"address\":1,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"},"
+        "{\"var_id\":\"x\",\"address\":1,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"word_order\":\"middle\",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"baud\":9600,\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"period_ms\":0,\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":-1,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0.5,\"type\":\"uint16\"}]}}",
         // same connection name twice
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]},"
-        " \"a\":{" MB ",\"outputs\":[{\"name\":\"y\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]},"
+        " \"a\":{" MB ",\"outputs\":[{\"var_id\":\"y\",\"address\":0,\"type\":\"uint16\"}]}}",
         // same variable name in two connections
-        "{\"a\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]},"
-        " \"b\":{" MB ",\"outputs\":[{\"name\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
+        "{\"a\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]},"
+        " \"b\":{" MB ",\"outputs\":[{\"var_id\":\"x\",\"address\":0,\"type\":\"uint16\"}]}}",
         // opcua
-        "{\"a\":{\"protocol\":\"opcua\",\"outputs\":[{\"name\":\"x\",\"node_id\":\"ns=1;i=1\",\"type\":\"bool\"}]}}",
+        "{\"a\":{\"protocol\":\"opcua\",\"outputs\":[{\"var_id\":\"x\",\"node_id\":\"ns=1;i=1\",\"type\":\"bool\"}]}}",
         "{\"a\":{\"protocol\":\"opcua\",\"endpoint\":\"opc.tcp://h:4840\",\"username\":\"u\","
-        "\"outputs\":[{\"name\":\"x\",\"node_id\":\"ns=1;i=1\",\"type\":\"bool\"}]}}",
+        "\"outputs\":[{\"var_id\":\"x\",\"node_id\":\"ns=1;i=1\",\"type\":\"bool\"}]}}",
         "{\"a\":{\"protocol\":\"opcua\",\"endpoint\":\"opc.tcp://h:4840\","
-        "\"outputs\":[{\"name\":\"x\",\"node_id\":\"what\",\"type\":\"bool\"}]}}",
+        "\"outputs\":[{\"var_id\":\"x\",\"node_id\":\"what\",\"type\":\"bool\"}]}}",
         // trdp
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"dest_ip\":\"239.0.0.1\",\"variables\":[]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":4,\"variables\":[]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0\",\"variables\":[]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":2,\"dest_ip\":\"239.0.0.1\","
-        "\"variables\":[{\"name\":\"x\",\"offset\":1,\"type\":\"uint16\"}]}]}}",
+        "\"variables\":[{\"var_id\":\"x\",\"offset\":1,\"type\":\"uint16\"}]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0.1\","
-        "\"variables\":[{\"name\":\"x\",\"offset\":0,\"type\":\"uint16\"},{\"name\":\"y\",\"offset\":1,\"type\":\"uint8\"}]}]}}",
+        "\"variables\":[{\"var_id\":\"x\",\"offset\":0,\"type\":\"uint16\"},{\"var_id\":\"y\",\"offset\":1,\"type\":\"uint8\"}]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0.1\","
-        "\"variables\":[{\"name\":\"x\",\"offset\":0,\"type\":\"bitset8\",\"bits\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]}]}]}}",
+        "\"variables\":[{\"var_id\":\"x\",\"offset\":0,\"type\":\"bitset8\",\"bits\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]}]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0.1\","
-        "\"variables\":[{\"name\":\"x\",\"offset\":0,\"type\":\"uint8\",\"bits\":[\"a\"]}]}]}}",
+        "\"variables\":[{\"var_id\":\"x\",\"offset\":0,\"type\":\"uint8\",\"bits\":[\"a\"]}]}]}}",
         "{\"a\":{" TR ",\"inputs\":[{\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0.1\","
-        "\"variables\":[{\"name\":\"x\",\"offset\":0,\"type\":\"bitset8\",\"bits\":[\"a\"]},"
-        "{\"name\":\"y\",\"offset\":0,\"type\":\"uint8\"}]}]}}",
+        "\"variables\":[{\"var_id\":\"x\",\"offset\":0,\"type\":\"bitset8\",\"bits\":[\"a\"]},"
+        "{\"var_id\":\"y\",\"offset\":0,\"type\":\"uint8\"}]}]}}",
         "{\"a\":{" TR ",\"outputs\":[{\"comid\":7,\"size\":4,\"variables\":[]},{\"comid\":7,\"size\":4,\"variables\":[]}]}}",
         "{\"a\":{" TR ",\"outputs\":[{\"comid\":7,\"size\":1433,\"variables\":[]}]}}",
+        // v0.5 format
+        "{\"a\":{\"interface\":\"modbus\",\"specification\":{}}}",
+        // TRDP message data
+        "{\"a\":{" TR ",\"inputs\":[{\"type\":\"Mq\",\"var_id\":\"m\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"inputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"enable_id\":\"m.go\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"inputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"dest_ip\":\"10.0.0.1\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mn\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"dest_ip\":\"10.0.0.1\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"comid\":1,"
+        "\"variables\":[{\"type\":\"padding\",\"bits\":4}]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"comid\":1,"
+        "\"variables\":[{\"var_id\":\"x\",\"type\":\"entry\",\"iterations_id\":\"n\"}]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"comid\":1,"
+        "\"structs\":{\"e\":[{\"var_id\":\"v\",\"type\":\"uint8\"}]},"
+        "\"variables\":[{\"var_id\":\"x\",\"type\":\"e\",\"iterations_id\":\"n\",\"max_iterations\":300}]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mn\",\"var_id\":\"m\",\"comid\":1,\"variables\":[]},"
+        "{\"type\":\"Mn\",\"var_id\":\"k\",\"comid\":1,\"variables\":[]}]}}",
+        // Mp without reply_to, Mp answering nothing, Mr without its Mp
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mp\",\"var_id\":\"m\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mp\",\"var_id\":\"m\",\"reply_to\":\"r\",\"comid\":1,\"variables\":[]}]}}",
+        "{\"a\":{" TR ",\"outputs\":[{\"type\":\"Mr\",\"var_id\":\"r\",\"comid\":1,\"variables\":[]}]}}",
         // two TRDP connections on the same local IP
         "{\"a\":{" TR ",\"outputs\":[{\"comid\":7,\"size\":1,\"variables\":[]}]},"
         " \"b\":{" TR ",\"outputs\":[{\"comid\":8,\"size\":1,\"variables\":[]}]}}",
@@ -270,13 +291,15 @@ static void test_config(void)
 
     // A valid TRDP config: bitsets expand to "<name>.<bit>" bools, unused bits are skipped.
     CHECK(load("{\"t\":{" TR ",\"local_ip\":\"0.0.0.0\","
-               "\"inputs\":[{\"name\":\"ST\",\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0.1\","
-               "\"variables\":[{\"name\":\"st\",\"offset\":0,\"type\":\"bitset16\",\"bits\":[\"a\",\"\",null,\"d\"]},"
-               "{\"name\":\"v\",\"offset\":2,\"type\":\"int16\"}]}],"
-               "\"outputs\":[{\"comid\":1,\"size\":1,\"variables\":[{\"name\":\"o\",\"offset\":0,\"type\":\"bool\"}]}]}}"));
-    CHECK(vars_count() == 4);
+               "\"inputs\":[{\"var_id\":\"ST\",\"comid\":1,\"size\":4,\"dest_ip\":\"239.0.0.1\","
+               "\"variables\":[{\"var_id\":\"st\",\"offset\":0,\"type\":\"bitset16\",\"bits\":[\"a\",\"\",null,\"d\"]},"
+               "{\"var_id\":\"v\",\"offset\":2,\"type\":\"int16\"}]}],"
+               "\"outputs\":[{\"comid\":1,\"size\":1,\"variables\":[{\"var_id\":\"o\",\"offset\":0,\"type\":\"bool\"}]}]}}"));
+    CHECK(vars_count() == 7); // st, st.a, st.bit1, st.bit2, st.d, v, o
     CHECK(vars_find("st.a") && var_type(vars_find("st.a")) == TYPE_BOOL);
-    CHECK(vars_find("st.d") && !vars_find("st"));
+    CHECK(vars_find("st.bit1") && vars_find("st.bit2") && vars_find("st.d"));
+    CHECK(vars_find("st") && var_type(vars_find("st")) == TYPE_UINT16);
+    CHECK(var_dir(vars_find("st")) == DIR_OUTPUT); // read-only copy of the bits
     CHECK(vars_find("o") && var_dir(vars_find("o")) == DIR_OUTPUT);
     unload();
 }
@@ -295,16 +318,16 @@ static int api_thread(void *arg)
 static void test_api(void)
 {
     CHECK(load("{\"plc\":{" MB ",\"port\":1,"
-               "\"inputs\":[{\"name\":\"speed\",\"address\":0,\"type\":\"uint16\"},"
-               "{\"name\":\"on\",\"address\":1,\"type\":\"bool\"},"
-               "{\"name\":\"t\",\"address\":2,\"type\":\"float32\"}],"
-               "\"outputs\":[{\"name\":\"state\",\"address\":10,\"type\":\"int16\"}]}}"));
+               "\"inputs\":[{\"var_id\":\"speed\",\"address\":0,\"type\":\"uint16\"},"
+               "{\"var_id\":\"on\",\"address\":1,\"type\":\"bool\"},"
+               "{\"var_id\":\"t\",\"address\":2,\"type\":\"float32\"}],"
+               "\"outputs\":[{\"var_id\":\"state\",\"address\":10,\"type\":\"int16\"}]}}"));
 
     cJSON *r = api("{\"cmd\":\"list_vars\"}");
     const cJSON *list = cJSON_GetObjectItem(r, "vars");
     CHECK(cJSON_GetArraySize(list) == 4);
     const cJSON *first = cJSON_GetArrayItem(list, 0);
-    CHECK(strcmp(cJSON_GetObjectItem(first, "name")->valuestring, "speed") == 0);
+    CHECK(strcmp(cJSON_GetObjectItem(first, "var_id")->valuestring, "speed") == 0);
     CHECK(strcmp(cJSON_GetObjectItem(first, "type")->valuestring, "uint16") == 0);
     CHECK(strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(list, 3), "dir")->valuestring, "output") == 0);
     cJSON_Delete(r);
@@ -315,25 +338,32 @@ static void test_api(void)
     CHECK(api_timestamp("speed") > 0);
     CHECK(api_write("t", 21.5) && api_read("t", NULL) == 21.5);
 
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"on\",\"value\":true}") == 0);
-    r = api("{\"cmd\":\"read\",\"name\":\"on\"}");
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"on\",\"value\":true}") == 0);
+    r = api("{\"cmd\":\"read\",\"var_id\":\"on\"}");
     CHECK(cJSON_IsTrue(cJSON_GetObjectItem(r, "value")));
+    CHECK(cJSON_GetObjectItem(r, "type")->valueint == TYPE_BOOL); // numeric code, as in v0.5
     CHECK(strcmp(cJSON_GetObjectItem(r, "dir")->valuestring, "input") == 0);
     cJSON_Delete(r);
 
-    CHECK(api_error("{\"cmd\":\"read\",\"name\":\"nope\"}") == ERR_NOT_FOUND);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"state\",\"value\":1}") == ERR_READ_ONLY);
+    CHECK(api_error("{\"cmd\":\"read\",\"var_id\":\"nope\"}") == ERR_NOT_FOUND);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"state\",\"value\":1}") == ERR_READ_ONLY);
     CHECK(api_error("not json") == ERR_INVALID_JSON);
     CHECK(api_error("[1,2]") == ERR_INVALID_JSON);
+    r = api("{\"cmd\":\"list_errors\"}");
+    const cJSON *errs = cJSON_GetObjectItem(r, "errors");
+    CHECK(cJSON_IsString(cJSON_GetObjectItem(errs, "1")) && cJSON_IsString(cJSON_GetObjectItem(errs, "6")));
+    cJSON_Delete(r);
+
     CHECK(api_error("{}") == ERR_INVALID_CMD);
-    CHECK(api_error("{\"cmd\":\"delete\",\"name\":\"speed\"}") == ERR_INVALID_CMD);
+    CHECK(api_error("{\"cmd\":\"read\",\"name\":\"speed\"}") == ERR_INVALID_CMD); // the key is var_id
+    CHECK(api_error("{\"cmd\":\"delete\",\"var_id\":\"speed\"}") == ERR_INVALID_CMD);
     CHECK(api_error("{\"cmd\":\"read\"}") == ERR_INVALID_CMD);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"speed\"}") == ERR_MISSING_VALUE);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"speed\",\"value\":\"1\"}") == ERR_INVALID_VALUE);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"speed\",\"value\":70000}") == ERR_INVALID_VALUE);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"speed\",\"value\":-1}") == ERR_INVALID_VALUE);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"speed\",\"value\":1.5}") == ERR_INVALID_VALUE);
-    CHECK(api_error("{\"cmd\":\"write\",\"name\":\"on\",\"value\":2}") == ERR_INVALID_VALUE);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"speed\"}") == ERR_MISSING_VALUE);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"speed\",\"value\":\"1\"}") == ERR_INVALID_VALUE);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"speed\",\"value\":70000}") == ERR_INVALID_VALUE);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"speed\",\"value\":-1}") == ERR_INVALID_VALUE);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"speed\",\"value\":1.5}") == ERR_INVALID_VALUE);
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"on\",\"value\":2}") == ERR_INVALID_VALUE);
     CHECK(api_read("speed", NULL) == 1234); // rejected writes change nothing
 
     // Same API over a real nng socket; messages are not NUL-terminated.
@@ -346,7 +376,7 @@ static void test_api(void)
     CHECK(nng_req0_open(&req) == 0);
     nng_socket_set_ms(req, NNG_OPT_RECVTIMEO, 2000);
     CHECK(nng_dial(req, "tcp://127.0.0.1:15555", NULL, 0) == 0);
-    char msg[] = "{\"cmd\":\"read\",\"name\":\"speed\"}";
+    char msg[] = "{\"cmd\":\"read\",\"var_id\":\"speed\"}";
     CHECK(nng_send(req, msg, sizeof(msg) - 1, 0) == 0);
     char *buf = NULL;
     size_t size = 0;
@@ -473,19 +503,19 @@ static void test_modbus(void)
 
     // Two connections to the same device: one per word order.
     CHECK(load("{\"plc\":{\"protocol\":\"modbus\",\"host\":\"localhost\",\"port\":15502,\"period_ms\":20,"
-               "\"inputs\":[{\"name\":\"speed\",\"address\":0,\"type\":\"uint16\"},"
-               "{\"name\":\"temp\",\"address\":2,\"type\":\"float32\"},"
-               "{\"name\":\"delta\",\"address\":4,\"type\":\"int32\"},"
-               "{\"name\":\"enable\",\"address\":6,\"type\":\"bool\"},"
-               "{\"name\":\"trim\",\"address\":7,\"type\":\"int8\"}],"
-               "\"outputs\":[{\"name\":\"setpoint\",\"address\":10,\"type\":\"uint16\"},"
-               "{\"name\":\"pressure\",\"address\":12,\"type\":\"float32\"},"
-               "{\"name\":\"level\",\"address\":14,\"type\":\"int16\"},"
-               "{\"name\":\"missing\",\"address\":500,\"type\":\"uint16\"}]},"
+               "\"inputs\":[{\"var_id\":\"speed\",\"address\":0,\"type\":\"uint16\"},"
+               "{\"var_id\":\"temp\",\"address\":2,\"type\":\"float32\"},"
+               "{\"var_id\":\"delta\",\"address\":4,\"type\":\"int32\"},"
+               "{\"var_id\":\"enable\",\"address\":6,\"type\":\"bool\"},"
+               "{\"var_id\":\"trim\",\"address\":7,\"type\":\"int8\"}],"
+               "\"outputs\":[{\"var_id\":\"setpoint\",\"address\":10,\"type\":\"uint16\"},"
+               "{\"var_id\":\"pressure\",\"address\":12,\"type\":\"float32\"},"
+               "{\"var_id\":\"level\",\"address\":14,\"type\":\"int16\"},"
+               "{\"var_id\":\"missing\",\"address\":500,\"type\":\"uint16\"}]},"
                "\"plc_le\":{\"protocol\":\"modbus\",\"host\":\"127.0.0.1\",\"port\":15502,\"period_ms\":20,"
                "\"word_order\":\"little\","
-               "\"inputs\":[{\"name\":\"le_in\",\"address\":20,\"type\":\"float32\"}],"
-               "\"outputs\":[{\"name\":\"le_out\",\"address\":22,\"type\":\"uint32\"}]}}"));
+               "\"inputs\":[{\"var_id\":\"le_in\",\"address\":20,\"type\":\"float32\"}],"
+               "\"outputs\":[{\"var_id\":\"le_out\",\"address\":22,\"type\":\"uint32\"}]}}"));
     quiet(true); // the unmapped register is reported on purpose
     CHECK(conns_start() == 0);
 
@@ -611,12 +641,12 @@ static void test_opcua(void)
     thrd_create(&loop, ua_loop, NULL);
 
     CHECK(load("{\"scada\":{\"protocol\":\"opcua\",\"endpoint\":\"opc.tcp://127.0.0.1:14840\",\"period_ms\":20,"
-               "\"inputs\":[{\"name\":\"speed\",\"node_id\":\"ns=1;s=in.speed\",\"type\":\"float64\"},"
-               "{\"name\":\"on\",\"node_id\":\"ns=1;s=in.on\",\"type\":\"bool\"}],"
-               "\"outputs\":[{\"name\":\"temp\",\"node_id\":\"ns=1;s=out.temp\",\"type\":\"float32\"},"
-               "{\"name\":\"count\",\"node_id\":\"ns=1;i=5001\",\"type\":\"int32\"},"
-               "{\"name\":\"wrong\",\"node_id\":\"ns=1;i=5002\",\"type\":\"uint16\"},"
-               "{\"name\":\"absent\",\"node_id\":\"ns=1;s=nope\",\"type\":\"uint16\"}]}}"));
+               "\"inputs\":[{\"var_id\":\"speed\",\"node_id\":\"ns=1;s=in.speed\",\"type\":\"float64\"},"
+               "{\"var_id\":\"on\",\"node_id\":\"ns=1;s=in.on\",\"type\":\"bool\"}],"
+               "\"outputs\":[{\"var_id\":\"temp\",\"node_id\":\"ns=1;s=out.temp\",\"type\":\"float32\"},"
+               "{\"var_id\":\"count\",\"node_id\":\"ns=1;i=5001\",\"type\":\"int32\"},"
+               "{\"var_id\":\"wrong\",\"node_id\":\"ns=1;i=5002\",\"type\":\"uint16\"},"
+               "{\"var_id\":\"absent\",\"node_id\":\"ns=1;s=nope\",\"type\":\"uint16\"}]}}"));
     quiet(true); // the mismatched and missing nodes are reported on purpose
     CHECK(conns_start() == 0);
 
@@ -663,6 +693,25 @@ static bool local_ipv4(char *out, size_t len)
     return found;
 }
 
+// Test configs are written with single quotes; $IP is the local address.
+static char *config_from(const char *tmpl, const char *ip)
+{
+    static char out[8192];
+    size_t n = 0;
+    for (const char *p = tmpl; *p && n + 20 < sizeof(out); p++)
+    {
+        if (strncmp(p, "$IP", 3) == 0)
+        {
+            n += (size_t)snprintf(out + n, sizeof(out) - n, "%s", ip);
+            p += 2;
+        }
+        else
+            out[n++] = *p == '\'' ? '"' : *p;
+    }
+    out[n] = '\0';
+    return out;
+}
+
 static void test_trdp(void)
 {
     char ip[INET_ADDRSTRLEN];
@@ -672,34 +721,58 @@ static void test_trdp(void)
         return;
     }
 
-    // One connection publishes and subscribes the same telegrams. Each telegram
-    // is read with a different layout than it is written with, which checks the
-    // bytes on the wire:
-    //   4242: written as a bitset, read as the raw byte
-    //   4243: written as the raw byte, read as a bitset
-    char config[2048];
-    snprintf(config, sizeof(config),
-             "{\"loop\":{\"protocol\":\"trdp\",\"local_ip\":\"%s\",\"inputs\":["
-             "{\"comid\":4242,\"dest_ip\":\"%s\",\"period_ms\":20,\"size\":8,\"variables\":["
-             "{\"name\":\"tx_speed\",\"offset\":0,\"type\":\"uint16\"},"
-             "{\"name\":\"tx_flags\",\"offset\":2,\"type\":\"bitset8\",\"bits\":[\"door\",\"\",\"fault\"]},"
-             "{\"name\":\"tx_delta\",\"offset\":4,\"type\":\"int32\"}]},"
-             "{\"comid\":4243,\"dest_ip\":\"%s\",\"period_ms\":20,\"size\":2,\"variables\":["
-             "{\"name\":\"tx_raw\",\"offset\":1,\"type\":\"uint8\"}]}],"
-             "\"outputs\":["
-             "{\"comid\":4242,\"period_ms\":20,\"size\":8,\"variables\":["
-             "{\"name\":\"rx_speed\",\"offset\":0,\"type\":\"uint16\"},"
-             "{\"name\":\"rx_raw\",\"offset\":2,\"type\":\"uint8\"},"
-             "{\"name\":\"rx_delta\",\"offset\":4,\"type\":\"int32\"}]},"
-             "{\"comid\":4243,\"period_ms\":20,\"size\":2,\"variables\":["
-             "{\"name\":\"rx_flags\",\"offset\":1,\"type\":\"bitset8\",\"bits\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\"]}]}]}}",
-             ip, ip, ip);
-    CHECK(load(config));
+    // One connection sends and receives the same telegrams. Most are read with
+    // a different layout than they are written with, which checks the wire:
+    //   Pd 4242: written as a bitset, read as the raw byte
+    //   Pd 4243: written as the raw byte, read as a bitset
+    //   Mn 5000: the padding is read back as a value (must be zero)
+    //   Mr 5001 -> Mp 5002: ammio asks itself and answers with an array of structs
+    const char *tmpl =
+        "{'loop': {'protocol': 'trdp', 'local_ip': '$IP', 'etb_topo_cnt_id': 'loop.etb',"
+        " 'inputs': ["
+        "  {'var_id': 'TX', 'enable_id': 'TX.enabled', 'comid': 4242, 'dest_ip': '$IP', 'period_ms': 20, 'size': 8,"
+        "   'variables': [{'var_id': 'tx_speed', 'offset': 0, 'type': 'uint16'},"
+        "                 {'var_id': 'tx_flags', 'offset': 2, 'type': 'bitset8', 'bits': ['door', '', 'fault']},"
+        "                 {'var_id': 'tx_delta', 'offset': 4, 'type': 'int32'}]},"
+        "  {'comid': 4243, 'dest_ip': '$IP', 'period_ms': 20, 'size': 2,"
+        "   'variables': [{'var_id': 'tx_raw', 'offset': 1, 'type': 'uint8'}]},"
+        "  {'type': 'Mn', 'var_id': 'note', 'enable_id': 'note.send', 'comid': 5000, 'dest_ip': '$IP',"
+        "   'variables': [{'var_id': 'code', 'type': 'uint16'}, {'type': 'padding', 'bits': 16},"
+        "                 {'var_id': 'level', 'type': 'float32'}]},"
+        "  {'type': 'Mr', 'var_id': 'ask', 'enable_id': 'ask.send', 'comid': 5001, 'dest_ip': '$IP',"
+        "   'timeout_ms': 1000, 'variables': [{'var_id': 'q', 'type': 'int32'}]},"
+        "  {'type': 'Mp', 'var_id': 'answer_tx', 'reply_to': 'ask_rx', 'comid': 5002,"
+        "   'structs': {'entry': [{'var_id': 'id', 'type': 'uint8'}, {'type': 'padding', 'bits': 8},"
+        "                         {'var_id': 'v', 'type': 'int16'}]},"
+        "   'variables': [{'var_id': 'status', 'type': 'uint8'},"
+        "                 {'var_id': 'list', 'type': 'entry', 'iterations_id': 'n',"
+        "                  'iterations_type': 'uint16', 'max_iterations': 3}]}],"
+        " 'outputs': ["
+        "  {'comid': 4242, 'period_ms': 20, 'size': 8,"
+        "   'variables': [{'var_id': 'rx_speed', 'offset': 0, 'type': 'uint16'},"
+        "                 {'var_id': 'rx_raw', 'offset': 2, 'type': 'uint8'},"
+        "                 {'var_id': 'rx_delta', 'offset': 4, 'type': 'int32'}]},"
+        "  {'comid': 4243, 'period_ms': 20, 'size': 2,"
+        "   'variables': [{'var_id': 'rx_flags', 'offset': 1, 'type': 'bitset8',"
+        "                  'bits': ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']}]},"
+        "  {'type': 'Mn', 'var_id': 'note_rx', 'comid': 5000,"
+        "   'variables': [{'var_id': 'code', 'type': 'uint16'}, {'var_id': 'pad', 'type': 'uint16'},"
+        "                 {'var_id': 'level', 'type': 'float32'}]},"
+        "  {'type': 'Mr', 'var_id': 'ask_rx', 'comid': 5001, 'variables': [{'var_id': 'q', 'type': 'int32'}]},"
+        "  {'type': 'Mp', 'var_id': 'answer', 'reply_to': 'ask', 'comid': 5002,"
+        "   'structs': {'entry': [{'var_id': 'id', 'type': 'uint8'}, {'type': 'padding', 'bits': 8},"
+        "                         {'var_id': 'v', 'type': 'int16'}]},"
+        "   'variables': [{'var_id': 'status', 'type': 'uint8'},"
+        "                 {'var_id': 'list', 'type': 'entry', 'iterations_id': 'n',"
+        "                  'iterations_type': 'uint16', 'max_iterations': 3}]}]}}";
+    CHECK(load(config_from(tmpl, ip)));
     CHECK(conns_start() == 0);
 
+    // Process data
     CHECK(api_write("tx_speed", 513));
     CHECK(api_write("tx_flags.door", 1));  // bit 0 = 0x80
     CHECK(api_write("tx_flags.fault", 1)); // bit 2 = 0x20
+    CHECK(api_write("tx_flags.bit1", 0));  // unnamed bits are "<var_id>.bit<N>"
     CHECK(api_write("tx_delta", -7));
     CHECK(api_write("tx_raw", 0x81));      // bits 0 and 7
     EVENTUALLY(api_read("rx_speed", NULL) == 513);
@@ -708,6 +781,50 @@ static void test_trdp(void)
     EVENTUALLY(api_read("rx_flags.a", NULL) == 1);
     EVENTUALLY(api_read("rx_flags.h", NULL) == 1);
     CHECK(api_read("rx_flags.b", NULL) == 0);
+    EVENTUALLY(api_read("rx_flags", NULL) == 0x81);  // whole bitset of an output
+    EVENTUALLY(api_read("tx_flags", NULL) == 0xA0);  // whole bitset of an input: assembled bits
+    CHECK(api_error("{\"cmd\":\"write\",\"var_id\":\"tx_flags\",\"value\":1}") == ERR_READ_ONLY);
+    CHECK(api_write("loop.etb", 5));                 // topology counter
+
+    // enable_id: 0 stops publishing, 1 starts again
+    quiet(true); // the subscriber's timeout is reported on purpose
+    CHECK(api_write("TX.enabled", 0));
+    sleep_ms(100);
+    CHECK(api_write("tx_speed", 999));
+    sleep_ms(200);
+    CHECK(api_read("rx_speed", NULL) == 513);
+    CHECK(api_write("TX.enabled", 1));
+    EVENTUALLY(api_read("rx_speed", NULL) == 999);
+    quiet(false);
+
+    // Mn: sent once when its enable flag is raised, which ammio then resets
+    CHECK(api_write("note.code", 1234));
+    CHECK(api_write("note.level", 2.5));
+    CHECK(api_write("note.send", 1));
+    EVENTUALLY(api_read("note_rx.code", NULL) == 1234);
+    EVENTUALLY(api_read("note_rx.level", NULL) == 2.5);
+    CHECK(api_read("note_rx.pad", NULL) == 0);
+    CHECK(api_read("note.send", NULL) == 0);
+
+    // Mr -> Mp, in both roles: ammio asks (ask/answer) and answers (ask_rx/answer_tx)
+    CHECK(api_write("answer_tx.status", 7));
+    CHECK(api_write("answer_tx.n", 2));
+    CHECK(api_write("answer_tx.list[0].id", 1));
+    CHECK(api_write("answer_tx.list[0].v", -100));
+    CHECK(api_write("answer_tx.list[1].id", 2));
+    CHECK(api_write("answer_tx.list[1].v", 200));
+    CHECK(api_write("answer_tx.list[2].id", 9)); // beyond n: not sent
+    CHECK(api_write("ask.q", -42));
+    CHECK(api_write("ask.send", 1));
+    EVENTUALLY(api_read("ask_rx.q", NULL) == -42);
+    EVENTUALLY(api_read("answer.status", NULL) == 7);
+    EVENTUALLY(api_read("answer.n", NULL) == 2);
+    CHECK(api_read("answer.list[0].id", NULL) == 1);
+    CHECK(api_read("answer.list[0].v", NULL) == -100);
+    CHECK(api_read("answer.list[1].id", NULL) == 2);
+    CHECK(api_read("answer.list[1].v", NULL) == 200);
+    CHECK(api_timestamp("answer.list[2].id") == 0);
+
     unload();
 }
 

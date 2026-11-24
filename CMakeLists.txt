@@ -155,6 +155,9 @@ add_library(ammio_core STATIC
     src/protocols/trdp.c
 )
 target_include_directories(ammio_core PUBLIC src)
+# open62541's (generated) headers as system headers: their warnings are not ours
+target_include_directories(ammio_core SYSTEM PRIVATE
+    $<TARGET_PROPERTY:open62541,INTERFACE_INCLUDE_DIRECTORIES>)
 target_link_libraries(ammio_core PUBLIC
     cjson uthash nng trdp modbus_lib open62541 Threads::Threads)
 if(NOT WIN32)

@@ -37,25 +37,25 @@ typedef struct
 static conn_t *conns = NULL;
 static size_t conn_count = 0;
 
-var_t *conn_add_var(const char *ctx, const char *name, type_t type, dir_t dir)
+var_t *conn_add_var(const char *ctx, const char *id, type_t type, dir_t dir)
 {
-    if (vars_find(name))
+    if (vars_find(id))
     {
-        log_error("%s: duplicate variable name '%s'", ctx, name);
+        log_error("%s: duplicate var_id '%s'", ctx, id);
         return NULL;
     }
-    var_t *var = vars_add(name, type, dir);
+    var_t *var = vars_add(id, type, dir);
     if (!var)
         log_error("%s: out of memory", ctx);
     return var;
 }
 
-void conn_report(const char *conn, const char *var, bool *state, const char *problem)
+void conn_report(const char *conn, const char *what, bool *state, const char *problem)
 {
     if (problem && !*state)
-        log_warn("%s: '%s': %s", conn, var, problem);
+        log_warn("%s: '%s': %s", conn, what, problem);
     else if (!problem && *state)
-        log_info("%s: '%s': OK again", conn, var);
+        log_info("%s: '%s': OK again", conn, what);
     *state = problem != NULL;
 }
 
@@ -115,6 +115,14 @@ int conns_load(const cJSON *root)
         if (!cJSON_IsObject(entry))
         {
             log_error("%s: must be an object", name);
+            ok = false;
+            continue;
+        }
+        if (cJSON_GetObjectItemCaseSensitive(entry, "interface") &&
+            cJSON_GetObjectItemCaseSensitive(entry, "specification"))
+        {
+            log_error("%s: this is the ammio v0.5 config format (\"interface\"/\"specification\"); "
+                      "see \"Migrating from v0.5\" in the README", name);
             ok = false;
             continue;
         }

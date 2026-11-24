@@ -85,7 +85,7 @@ static value_t decode(const modbus_conn_t *m, const reg_t *r, const uint16_t *re
 
 static bool parse_regs(modbus_conn_t *m, const cJSON *arr, const char *key, dir_t dir)
 {
-    static const char *const keys[] = {"name", "address", "type", NULL};
+    static const char *const keys[] = {"var_id", "name", "address", "type", NULL};
     bool ok = true;
     int index = 0;
     const cJSON *item;
@@ -95,7 +95,7 @@ static bool parse_regs(modbus_conn_t *m, const cJSON *arr, const char *key, dir_
         char ctx[256];
         snprintf(ctx, sizeof(ctx), "%s.%s[%d]", m->conn, key, index++);
 
-        const char *name = NULL;
+        const char *id = NULL, *label = NULL;
         uint32_t address = 0;
         type_t type = TYPE_UINT16;
         if (!cJSON_IsObject(item))
@@ -105,7 +105,9 @@ static bool parse_regs(modbus_conn_t *m, const cJSON *arr, const char *key, dir_
             continue;
         }
         bool item_ok = json_check_keys(item, ctx, keys);
-        item_ok &= json_need_string(item, "name", ctx, &name);
+        item_ok &= json_need_string(item, "var_id", ctx, &id);
+        item_ok &= json_get_string(item, "name", ctx, &label); // optional description
+        (void)label;
         item_ok &= json_need_uint(item, "address", ctx, 0, 65535, &address);
         item_ok &= json_need_type(item, ctx, &type);
         if (!item_ok)
@@ -122,7 +124,7 @@ static bool parse_regs(modbus_conn_t *m, const cJSON *arr, const char *key, dir_
             continue;
         }
 
-        var_t *var = conn_add_var(ctx, name, type, dir);
+        var_t *var = conn_add_var(ctx, id, type, dir);
         if (!var)
         {
             ok = false;
@@ -144,8 +146,8 @@ static bool check_overlaps(const modbus_conn_t *m)
             if (a->address < b->address + b->count && b->address < a->address + a->count)
             {
                 log_error("%s: '%s' (registers %u..%u) overlaps '%s' (registers %u..%u)", m->conn,
-                          var_name(a->var), a->address, a->address + a->count - 1,
-                          var_name(b->var), b->address, b->address + b->count - 1);
+                          var_id(a->var), a->address, a->address + a->count - 1,
+                          var_id(b->var), b->address, b->address + b->count - 1);
                 ok = false;
             }
         }
@@ -340,13 +342,13 @@ static int modbus_cycle(void *self, char *err, size_t err_len)
             char problem[160];
             snprintf(problem, sizeof(problem), "%s register %u: %s",
                      i < m->input_count ? "cannot write" : "cannot read", r->address, modbus_strerror(e));
-            conn_report(m->conn, var_name(r->var), &r->failing, problem);
+            conn_report(m->conn, var_id(r->var), &r->failing, problem);
             continue;
         }
 
         if (i >= m->input_count)
             var_set(r->var, decode(m, r, regs));
-        conn_report(m->conn, var_name(r->var), &r->failing, NULL);
+        conn_report(m->conn, var_id(r->var), &r->failing, NULL);
     }
     return 0;
 }

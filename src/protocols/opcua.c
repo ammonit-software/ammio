@@ -57,7 +57,7 @@ static const UA_DataType *ua_type_of(type_t type)
 
 static bool parse_nodes(opcua_conn_t *o, const cJSON *arr, const char *key, dir_t dir)
 {
-    static const char *const keys[] = {"name", "node_id", "type", NULL};
+    static const char *const keys[] = {"var_id", "name", "node_id", "type", NULL};
     bool ok = true;
     int index = 0;
     const cJSON *item;
@@ -67,7 +67,7 @@ static bool parse_nodes(opcua_conn_t *o, const cJSON *arr, const char *key, dir_
         char ctx[256];
         snprintf(ctx, sizeof(ctx), "%s.%s[%d]", o->conn, key, index++);
 
-        const char *name = NULL, *node_id = NULL;
+        const char *id = NULL, *label = NULL, *node_id = NULL;
         type_t type = TYPE_FLOAT64;
         if (!cJSON_IsObject(item))
         {
@@ -76,7 +76,9 @@ static bool parse_nodes(opcua_conn_t *o, const cJSON *arr, const char *key, dir_
             continue;
         }
         bool item_ok = json_check_keys(item, ctx, keys);
-        item_ok &= json_need_string(item, "name", ctx, &name);
+        item_ok &= json_need_string(item, "var_id", ctx, &id);
+        item_ok &= json_get_string(item, "name", ctx, &label); // optional description
+        (void)label;
         item_ok &= json_need_string(item, "node_id", ctx, &node_id);
         item_ok &= json_need_type(item, ctx, &type);
         if (!item_ok)
@@ -94,7 +96,7 @@ static bool parse_nodes(opcua_conn_t *o, const cJSON *arr, const char *key, dir_
             continue;
         }
 
-        var_t *var = conn_add_var(ctx, name, type, dir);
+        var_t *var = conn_add_var(ctx, id, type, dir);
         if (!var)
         {
             UA_NodeId_clear(&node);
@@ -225,7 +227,7 @@ static void report_status(opcua_conn_t *o, node_t *n, const char *op, UA_StatusC
 {
     char problem[160];
     snprintf(problem, sizeof(problem), "%s failed: %s", op, UA_StatusCode_name(sc));
-    conn_report(o->conn, var_name(n->var), &n->failing, sc == UA_STATUSCODE_GOOD ? NULL : problem);
+    conn_report(o->conn, var_id(n->var), &n->failing, sc == UA_STATUSCODE_GOOD ? NULL : problem);
 }
 
 static int write_inputs(opcua_conn_t *o, char *err, size_t err_len)
@@ -296,14 +298,14 @@ static int read_outputs(opcua_conn_t *o, char *err, size_t err_len)
                 snprintf(problem, sizeof(problem), "server value is %s, configured type is %s",
                          dv->value.type ? dv->value.type->typeName : "empty",
                          type_name(var_type(n->var)));
-                conn_report(o->conn, var_name(n->var), &n->failing, problem);
+                conn_report(o->conn, var_id(n->var), &n->failing, problem);
                 continue;
             }
 
             value_t v = {0};
             memcpy(&v, dv->value.data, n->ua_type->memSize);
             var_set(n->var, v);
-            conn_report(o->conn, var_name(n->var), &n->failing, NULL);
+            conn_report(o->conn, var_id(n->var), &n->failing, NULL);
         }
     }
     UA_ReadResponse_clear(&resp);
