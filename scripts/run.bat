@@ -1,20 +1,8 @@
 @echo off
+REM Usage: scripts\run.bat [--release] <config.json> [ammio options]
 
-REM Manage directories/paths
 cd /d %~dp0..\
-set BUILD_DIR=build
+set "CONFIG=Debug"
+if /I "%~1"=="--release" (set "CONFIG=Release" & shift)
 
-REM Arguments defaults
-set CONFIG=Debug
-
-REM Parse arguments
-:parse_args
-if "%~1"=="" goto end_parse
-if /I "%~1"=="--config" (set CONFIG=%~2 & shift & shift & goto parse_args)
-echo WARNING: Unknown option "%~1"
-shift
-goto parse_args
-:end_parse
-
-REM Manage run
-"%BUILD_DIR%\%CONFIG%\ammio.exe" --config config\config.json --interface config\interface.json
+"build\%CONFIG%\ammio.exe" %1 %2 %3 %4 %5 %6 %7 %8 %9

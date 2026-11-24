@@ -26,9 +26,9 @@ Makefile
 # Debug files
 *.dSYM/
 
-# Configurations
-config.json
-interface.json
+# Local configs (the *.example.json files are tracked)
+config/*.json
+!config/*.example.json
 
 # Claude
 CLAUDE.md

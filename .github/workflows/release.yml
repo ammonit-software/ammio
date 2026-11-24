@@ -8,22 +8,50 @@ on:
     branches: [main]
 
 jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # tags, for the version string
+
+      - name: Build and test
+        run: scripts/build_linux.sh Release
+
+      - name: Package
+        run: |
+          mkdir package
+          cp build/ammio config/*.example.json package/
+          tar -czf ammio-linux-x64.tar.gz -C package .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ammio-linux-x64
+          path: ammio-linux-x64.tar.gz
+
   build-windows:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Build
         shell: cmd
         run: scripts\build_windows-x64.bat --clean --config Release
+
+      - name: Check example configs
+        shell: cmd
+        run: for %%f in (config\*.example.json) do build\Release\ammio.exe --check %%f || exit /b 1
 
       - name: Package
         shell: cmd
         run: |
           mkdir package
           copy build\Release\ammio.exe package\
+          copy config\*.example.json package\
           tar -acf ammio-windows-x64.zip -C package .
 
       - uses: actions/upload-artifact@v4
@@ -32,14 +60,15 @@ jobs:
           path: ammio-windows-x64.zip
 
   release:
-    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ammio-windows-x64
+          merge-multiple: true
 
       - name: Create release
         env:
@@ -47,6 +76,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create ${{ github.ref_name }} \
-            ammio-windows-x64.zip \
+            ammio-linux-x64.tar.gz ammio-windows-x64.zip \
             --title "Release ${{ github.ref_name }}" \
             --generate-notes

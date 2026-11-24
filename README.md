@@ -8,226 +8,269 @@
 
 # ammio
 
-**ammio** is a protocol agnostic test interface for critical-software systems. It sits between your test tooling and your SUT, speaking the SUT's native protocol on one side and exposing all its variables over a plain JSON API on the other. Talk to any software system in JSON, regardless of its protocol.
+**ammio** sits between your test tooling and your SUT. It speaks the SUT's protocol (Modbus, OPC UA, TRDP) on one side and exposes every variable through one small JSON API on the other.
 
-It addresses three core pain points in critical systems testing:
-
-- *The protocol barrier*: SUTs speak TRDP, CAN, OPC UA, Modbus — each requiring specialist knowledge just to read a variable. **ammio** abstracts all of it into a single JSON API.
-- *The feedback loop speed*: Hardware-in-the-loop benches take days to set up. **ammio** lets scripts and automated tests interact with the SUT immediately, without a physical bench.
-- *The protocol migration problem*: When a SUT changes or adds a protocol, every tool and test script that talked to it breaks. With **ammio** in the middle, the JSON API stays the same — no refactoring, no disruption.
+- **No protocol barrier**: read and write SUT variables by name, without knowing the protocol.
+- **Fast feedback**: scripts and automated tests talk to the SUT directly, without a hardware bench.
+- **Protocol changes don't break tests**: when the SUT changes protocol, only the config changes, and the JSON API stays the same.
 
 ## Quickstart
 
-### 1. Download
+**1. Download** the latest release for your system:
 
-#### Windows
-```cmd
-mkdir ammio
-cd ammio
-curl -L -o ammio-windows-x64.zip https://github.com/ammonit-software/ammio/releases/latest/download/ammio-windows-x64.zip
-tar -xf ammio-windows-x64.zip
-curl -L -o config.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/config.example.json
-curl -L -o interface.json https://raw.githubusercontent.com/ammonit-software/ammio/main/config/interface.example.json
-
+```bash
+curl -L https://github.com/ammonit-software/ammio/releases/latest/download/ammio-linux-x64.tar.gz | tar -xz
 ```
 
-Tinker the `config.json` and `interface.json` and adapt them for tour needs. See [Configuration](#configuration) for more details.
+On Windows, download `ammio-windows-x64.zip` from the same release page and unzip it.
 
-### 2. Run
+Both archives contain the `ammio` executable and one example config per protocol.
 
-#### Windows
-```cmd
-ammio.exe --config config.json --interface interface.json
+**2. Describe your SUT** in one JSON file. Start from an example, e.g. `cp modbus.example.json sut.json`, and edit it:
+
+```json
+{
+    "plc": {
+        "protocol": "modbus",
+        "host": "192.168.1.10",
+        "inputs":  [ { "name": "motor_speed_actual",   "address": 0,  "type": "uint16" } ],
+        "outputs": [ { "name": "motor_speed_setpoint", "address": 10, "type": "uint16" } ]
+    }
+}
 ```
 
-### 3. Interact
+**3. Check and run**:
 
-#### Using ammtest (recommended)
-
-**[ammtest](https://github.com/ammonit-software/ammtest)** is the recommended client — it adds test scripting, pytest integration, and result reporting on top of ammio.
-
-#### Using a plain nng client
-
-Any language with an nng binding works.
-
-## Architecture
-
-**ammio** sits between an *ammio client* and the SUT — speaking the SUT's native protocol on one side, and exposing a simple JSON API on the other. This makes the SUT accessible to any tooling, agnostic from the underlying communication layer.
-
-All *ammio clients* communicate over [nng](https://nng.nanomsg.org/) REQ/REP. **[ammtest](https://github.com/ammonit-software/ammtest)**, also built by Ammonit Software, is the recommended client — it adds test scripting, automation, and reporting on top of ammio.
-
-In that way, anybody is able to interact with the SUT programmatically — tests can be scripted and automated, experiments launched, and custom integration built.
-
-There are two variable directions:
-
-- **Inputs** — the client writes a value, **ammio** publishes it to the SUT over the protocol bus
-- **Outputs** — the SUT publishes a value, **ammio** receives it and makes it available for the client to read
-
-All variables live in an internal store (**var_table**) that is continuously synchronized with the protocol bus. Any nng-compatible client can connect and interact with those variables at any time.
-
-```
-  test client (e.g. ammtest)
-         │
-         │  write(INPUT_VAR, value)      → ammio forwards to SUT via protocol bus
-         │  value = read(OUTPUT_VAR)     ← ammio receives from SUT via protocol bus
-         │
-         │ nng REQ/REP · JSON · TCP
-         │
-  ┌──────│───────────────────────────────────────────────────┐
-  │      │                                          ammio    │
-  │      ▼                                                   │
-  │  ┌────────────┐   ┌──────────────────┐   ┌───────────┐   │
-  │  │ var_server │◄──│    var_table     │◄──│Interfaces │   │
-  │  │            │   │ inputs / outputs │   │TRDP · CAN │   │
-  │  └────────────┘   └──────────────────┘   └─────┬─────┘   │
-  └─────────────────────────────────────────────── │ ────────┘
-                                                   │ protocol bus
-                                                   ▼
-                                          System Under Test (SUT)
+```bash
+./ammio --check sut.json
 ```
 
-**var_server**: Client-facing endpoint (nng REQ/REP over TCP). Accepts JSON requests, enforces direction constraints (outputs are read-only for clients), and returns numeric error codes.
+```bash
+./ammio sut.json
+```
 
-**var_table**: Central variable store. Holds every variable with its type, direction (`input`/`output`), current value, and timestamp. Continuously updated by the interface layer. Thread-safe — clients and interfaces access it concurrently without coordination.
+`--check` validates the config without connecting and reports every problem it finds, each with its exact location (for example `plc.inputs[2].type: unknown type 'unit16'`).
 
-**Interfaces**: Each interface (TRDP, CAN, ...) implements `init / start / stop` and runs a single `thread_process` loop — push inputs to the protocol bus, run protocol housekeeping, pull outputs back into var_table. One thread per interface keeps protocol libraries that are not thread-safe from conflicting.
+**4. Talk to it** from any language with an [nng](https://nng.nanomsg.org/) binding. With Python (`pip install pynng`):
+
+```python
+import json, pynng
+
+with pynng.Req0(dial="tcp://127.0.0.1:5555") as sock:
+    def ammio(**request):
+        sock.send(json.dumps(request).encode())
+        return json.loads(sock.recv())
+
+    ammio(cmd="write", name="motor_speed_actual", value=1200)
+    print(ammio(cmd="read", name="motor_speed_setpoint"))
+```
+
+**[ammtest](https://github.com/ammonit-software/ammtest)** is the recommended client. It adds test scripting, pytest integration and reporting on top of ammio.
+
+## Command line
+
+```
+ammio [options] <config.json>
+
+  -e, --endpoint <url>  where clients connect (default: tcp://127.0.0.1:5555)
+  -c, --check           validate the config and exit
+  -v, --verbose         log debug details
+  -h, --help            show this help
+      --version         show the version
+```
+
+ammio stops cleanly on Ctrl+C or `SIGTERM`.
+
+## Client API
+
+Clients send JSON requests over nng REQ/REP (TCP by default). Every request gets exactly one JSON reply.
+
+| Request | Reply |
+|---|---|
+| `{"cmd": "read", "name": "x"}` | `{"name": "x", "type": "uint16", "dir": "output", "value": 42, "timestamp": 1732460000123456789}` |
+| `{"cmd": "write", "name": "x", "value": 42}` | `{"status": "ok"}` |
+| `{"cmd": "list_vars"}` | `{"vars": [{"name": "x", "type": "uint16", "dir": "output"}, ...]}` |
+
+- `value` is a JSON number, or `true`/`false` for `bool` variables (numbers 0/1 are accepted too).
+- `timestamp` is the time of the last update, in nanoseconds since the Unix epoch: the last client write for inputs, the last value received from the SUT for outputs. `0` means never updated. Use it to detect stale data.
+- Writes are exact. A value that doesn't fit the variable's type (out of range, or a fraction for an integer type) is rejected, never truncated.
+
+Errors are returned as `{"error": <code>, "message": "<what went wrong>"}`:
+
+| Code | Meaning |
+|---|---|
+| 1 | Unknown variable |
+| 2 | Variable is an output (read-only) |
+| 3 | Request is not a JSON object |
+| 4 | Unknown command, or missing `cmd` / `name` |
+| 5 | `write` without `value` |
+| 6 | Value doesn't fit the variable's type |
 
 ## Configuration
 
-### `config/config.json`
-
-```jsonc
-{
-    "log_level": 1,                           // 0 = debug, 1 = info
-    "ammio_endpoint": "tcp://127.0.0.1:5555"  // nng endpoint where ammio listens for client connections
-}
-```
-
-### `config/interface.json`
-
-Each entry is a user-defined connection name bound to a protocol and its specification. Multiple connections of different types can coexist in the same file.
-
-**Variable direction** defines the data flow between ammio and the SUT:
+A config file is a JSON object of **connections**. Each connection has a user-chosen name, a `protocol`, the protocol's connection settings, and lists of `inputs` and `outputs`. A config can hold any number of connections of any protocols. Variable names must be unique across the whole file.
 
 | Direction | Data flow | Typical variables |
 |---|---|---|
-| `input` | ammio → SUT | Sensor readings, external device states, status feedback that the SUT consumes |
-| `output` | SUT → ammio | Commands, setpoints, enable signals that the SUT produces |
+| `inputs` | client → ammio → SUT | Sensor readings, external device states, feedback the SUT consumes |
+| `outputs` | SUT → ammio → client | Commands, setpoints, enable signals the SUT produces (read-only for clients) |
 
-See `config/interface.x.example.json` files for ready-to-use starting points depending on the protocol.
+**Types**: `bool`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `float32`, `float64`.
 
-#### Modbus
+ammio is strict: unknown keys, missing keys, bad values, duplicate names and overlapping addresses are all errors. A typo such as `"adress"` stops startup instead of silently becoming address 0.
 
-```jsonc
+Ready-to-use examples are in [`config/`](config).
+
+### Modbus
+
+ammio is the Modbus master (client). It writes inputs to holding registers and reads outputs from holding registers, once per `period_ms`.
+
+```json
 {
-    "plc_connection": {                             // user-defined connection name
-        "interface": "modbus",
-        "specification": {
-            "mode": "tcp",                          // "tcp" for Ethernet, "rtu" for serial
-            "host": "192.168.1.10",                 // slave IP address (TCP only)
-            "port": 502,                            // slave port, default 502 (TCP only)
-            "slave_id": 1,                          // Modbus device address (1-247)
-            "period_ms": 100,                       // read/write cycle interval in ms
-            "registers": {
-                "inputs": [                         // holding registers ammio writes (SUT inputs)
-                    {
-                        "name": "motor_speed_actual",   // variable name in var_table and JSON API
-                        "address": 0,               // 0-based register address on the slave
-                        "type": "uint16"            // uint8 int8 uint16 int16 uint32 int32 float32 float64
-                    }
-                ],
-                "outputs": [                        // holding registers ammio reads (SUT outputs)
-                    {
-                        "name": "motor_speed_setpoint",
-                        "address": 10,
-                        "type": "uint16"
-                    }
-                ]
-            }
-        }
+    "plc": {
+        "protocol": "modbus",
+        "host": "192.168.1.10",
+        "inputs":  [ { "name": "motor_current", "address": 2,  "type": "float32" } ],
+        "outputs": [ { "name": "motor_enable",  "address": 14, "type": "bool" } ]
     }
 }
 ```
 
-#### TRDP
+| Key | Default | Description |
+|---|---|---|
+| `host` | | Modbus TCP: IP address or hostname of the slave |
+| `port` | `502` | Modbus TCP port |
+| `device` | | Modbus RTU: serial port (`COM3`, `/dev/ttyUSB0`); use instead of `host` |
+| `baud`, `parity`, `data_bits`, `stop_bits` | `9600`, `"N"`, `8`, `1` | Modbus RTU serial settings (parity: `"N"`, `"E"` or `"O"`) |
+| `slave_id` | `1` | Unit identifier |
+| `period_ms` | `100` | Read/write cycle |
+| `word_order` | `"big"` | Word order of 32/64-bit values: `"big"` = high word first (standard), `"little"` = low word first |
 
-```jsonc
+Variables: `name`, `address` (0-based register), `type`. 8- and 16-bit types use one register, 32-bit types use two, `float64` uses four.
+
+### OPC UA
+
+ammio is an OPC UA client. Each period it writes all inputs in one request and reads all outputs in one request.
+
+```json
 {
-    "train_network": {                              // user-defined connection name
-        "interface": "trdp",
-        "specification": {
-            "local_ip": "192.168.1.100",            // local NIC to bind to
-                                                    // use "0.0.0.0" for the default interface
-                                                    // loopback (127.0.0.1) is not supported
-            "containers": {
-                "inputs": [                         // PD containers ammio publishes (SUT inputs)
-                    {
-                        "name": "DOOR_STATUS",      // container name, used for logging
-                        "comid": 2000,              // TRDP communication ID, must match SUT dataset
-                        "multicast_ip": "239.255.1.2", // multicast group IP for this dataset
-                        "period_ms": 100,           // publish interval in ms
-                        "size_bits": 32,            // total payload size in bits, must match SUT dataset
-                        "variables": [              // variable mappings packed inside this container
-                            {
-                                "name": "door_is_open", // variable name in var_table and JSON API
-                                "offset": 0,        // bit offset within the container payload
-                                "type": "uint8"     // uint8 int8 uint16 int16 uint32 int32 float32 float64
-                            }
-                        ]
-                    }
-                ],
-                "outputs": [                        // PD containers ammio subscribes to (SUT outputs)
-                    {
-                        "name": "DOOR_CONTROL",
-                        "comid": 1000,
-                        "multicast_ip": "239.255.1.1",
-                        "period_ms": 100,
-                        "size_bits": 32,
-                        "variables": [
-                            { "name": "door_open_cmd", "offset": 0, "type": "uint8" }
-                        ]
-                    }
-                ]
-            }
-        }
+    "scada": {
+        "protocol": "opcua",
+        "endpoint": "opc.tcp://192.168.1.20:4840",
+        "inputs":  [ { "name": "motor_speed_actual", "node_id": "ns=1;s=Motor.SpeedActual", "type": "float32" } ],
+        "outputs": [ { "name": "motor_enable",       "node_id": "ns=1;i=1001",              "type": "bool" } ]
     }
 }
 ```
 
-#### OPC UA
+| Key | Default | Description |
+|---|---|---|
+| `endpoint` | | Server URL |
+| `username`, `password` | | Optional, set both or neither |
+| `period_ms` | `100` | Read/write cycle |
 
-```jsonc
+Variables: `name`, `node_id` (`ns=1;s=Name`, `ns=1;i=1001`, ... use a browser such as UaExpert to find them), `type`. The type must match the node's data type (`bool` = Boolean, `uint8` = Byte, `float32` = Float, `float64` = Double, ...). A mismatch is reported and the value is never misread.
+
+### TRDP
+
+ammio publishes inputs and subscribes to outputs as TRDP process data telegrams.
+
+```json
 {
-    "scada_server": {                               // user-defined connection name
-        "interface": "opcua",
-        "specification": {
-            "endpoint": "opc.tcp://192.168.1.20:4840", // OPC UA server URL
-            "username": "operator",                 // optional, for authenticated servers
-            "password": "password",                 // optional
-            "period_ms": 100,                       // read/write cycle interval in ms
-            "nodes": {
-                "inputs": [                         // nodes ammio writes to (SUT inputs)
-                    {
-                        "name": "motor_speed_actual",   // variable name in var_table and JSON API
-                        "node_id": "ns=1;s=Motor.SpeedActual", // OPC UA node identifier
-                                                    // ns=<namespace>;s=<string name>
-                                                    // ns=<namespace>;i=<numeric id>
-                                                    // browse node IDs with UAExpert or similar tool
-                        "type": "float32"           // uint8 int8 uint16 int16 uint32 int32 float32 float64
-                    }
-                ],
-                "outputs": [                        // nodes ammio reads from (SUT outputs)
-                    {
-                        "name": "motor_speed_setpoint",
-                        "node_id": "ns=1;s=Motor.SpeedSetpoint",
-                        "type": "float32"
-                    }
+    "train": {
+        "protocol": "trdp",
+        "local_ip": "192.168.1.100",
+        "inputs": [
+            {
+                "name": "DOOR_STATUS", "comid": 2000, "dest_ip": "239.255.1.2", "period_ms": 100, "size": 4,
+                "variables": [
+                    { "name": "door_is_open", "offset": 0, "type": "uint8" },
+                    { "name": "door_alarm",   "offset": 3, "type": "bitset8", "bits": ["obstacle", "emergency_release"] }
                 ]
             }
-        }
+        ],
+        "outputs": [
+            {
+                "name": "DOOR_CONTROL", "comid": 1000, "dest_ip": "239.255.1.1", "period_ms": 100, "size": 4,
+                "variables": [ { "name": "door_open_cmd", "offset": 0, "type": "uint8" } ]
+            }
+        ]
     }
 }
 ```
+
+| Key | Default | Description |
+|---|---|---|
+| `local_ip` | `"0.0.0.0"` | Local interface to use. Loopback (`127.0.0.1`) is not supported by TRDP. Use one connection per local IP. |
+
+Telegrams (`inputs` / `outputs`):
+
+| Key | Default | Description |
+|---|---|---|
+| `comid` | | Communication ID, must match the SUT's dataset |
+| `size` | | Payload size in bytes (up to 1432), must match the SUT's dataset |
+| `dest_ip` | | Destination address of the telegram: multicast group or unicast IP. Required for inputs. For outputs, the multicast group to join (omit for unicast). |
+| `period_ms` | `100` | Inputs: publish interval. Outputs: expected interval; after 3 missed periods a timeout is logged and the last values are kept. |
+| `name` | | Optional, used in logs |
+| `variables` | | `name`, `offset` (bytes from the start of the payload), `type` |
+
+Values are big-endian. A `bool` occupies one byte (TRDP `BOOL8`). For single bits, use `"type": "bitset8"` (or `bitset16`, `bitset32`) with a `bits` list. Each named bit becomes a `bool` variable called `<name>.<bit>` (for example `door_alarm.obstacle`). Bit 0 is the most significant bit of the first byte. Use `""` or `null` to skip a reserved bit.
+
+## How it behaves
+
+- **One thread per connection.** Each connection connects, then repeatedly sends inputs and receives outputs. Protocol libraries never share a thread.
+- **Automatic reconnection.** If a connection can't be established or is lost, ammio retries every second. Clients keep working throughout: reads return the last known value and its timestamp.
+- **Quiet logs.** Problems are logged once when they appear and once when they clear (`connected`, `connection lost`, `'x': Illegal data address`, `'x': OK again`), never once per cycle. Use `-v` for details.
+- **Problems with one variable don't drop the link.** Examples are a Modbus exception, an OPC UA node that doesn't exist, or a type mismatch. The variable is reported and everything else keeps flowing.
+
+## Architecture
+
+```
+  test client (e.g. ammtest)
+         │  JSON over nng REQ/REP
+  ┌──────▼──────────────────────────────────────────────┐
+  │  server.c ──► vars.c (variable store) ◄── conn.c    │ ammio
+  │                                            │        │
+  │                   protocols/modbus.c · opcua.c · trdp.c
+  └────────────────────────────────────────────┼────────┘
+                                               ▼
+                                      System Under Test
+```
+
+| File | Role |
+|---|---|
+| `src/main.c` | Command line, startup, shutdown |
+| `src/server.c` | Client API |
+| `src/vars.c` | Variable store, types, value conversion |
+| `src/conn.c` | Runs each connection: thread, cycle timing, reconnection, logging |
+| `src/json.c` | Strict config reading with precise error messages |
+| `src/protocols/*.c` | One file per protocol: parse config, connect, exchange data |
+
+### Adding a protocol
+
+A protocol is a `protocol_t` (see [`src/protocol.h`](src/protocol.h)) with five functions: `create` (validate config, register variables), `connect`, `cycle` (one exchange), `disconnect` and `destroy`. Threads, timing, reconnection and logging are handled by ammio. Add the file to `CMakeLists.txt` and the protocol to the table in `src/conn.c`.
+
+## Building from source
+
+Dependencies are git submodules and are built from source, so no system libraries are needed.
+
+```bash
+git clone --recursive https://github.com/ammonit-software/ammio.git
+```
+
+Linux (builds and runs the tests):
+
+```bash
+scripts/build_linux.sh
+```
+
+Windows (Visual Studio 2022 build tools):
+
+```cmd
+scripts\build_windows-x64.bat --config Release
+```
+
+The test suite (`-DAMMIO_TESTS=ON`, POSIX only) runs ammio against real in-process Modbus TCP and OPC UA servers and a TRDP loop, and also covers the client API, value conversion and config validation.
 
 ## Related Projects
 
