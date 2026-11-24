@@ -2,6 +2,10 @@
 
 #include "uthash.h"
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4127 4702) // raised by uthash's macros (do/while(0), dead branches)
+#endif
+
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
