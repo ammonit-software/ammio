@@ -7,6 +7,16 @@ on:
     branches: [main]
 
 jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and test
+        run: scripts/build_linux.sh Release
+
   build-windows:
     runs-on: windows-2022
     steps:
@@ -17,3 +27,7 @@ jobs:
       - name: Build
         shell: cmd
         run: scripts\build_windows-x64.bat --clean --config Release
+
+      - name: Check example configs
+        shell: cmd
+        run: for %%f in (config\*.example.json) do build\Release\ammio.exe --check %%f || exit /b 1
